@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Page</title>
+</head>
+<body>
+    <h1>If you see this, the server is working!</h1>
+    <p>Now check the browser console (F12) for JavaScript errors.</p>
+    <script>
+        console.log("Test page loaded successfully");
+        fetch('http://localhost:8080/health')
+            .then(r => r.json())
+            .then(data => {
+                console.log("API Response:", data);
+                document.body.innerHTML += "<p style='color: green;'>API is accessible!</p>";
+            })
+            .catch(err => {
+                console.error("API Error:", err);
+                document.body.innerHTML += "<p style='color: red;'>API Error: " + err.message + "</p>";
+            });
+    </script>
+</body>
+</html>
+

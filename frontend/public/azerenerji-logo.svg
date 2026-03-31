@@ -1,0 +1,24 @@
+<svg width="200" height="50" viewBox="0 0 200 50" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradient for the arc (lighter at peak) -->
+    <linearGradient id="arcGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#93c5fd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Curved swoosh arc above Azər -->
+  <path d="M 10 10 Q 25 2 40 10" stroke="url(#arcGradient)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- AzərEnerji Text - A and E capitalized, rest lowercase -->
+  <text x="15" y="38" font-family="'Segoe UI', 'Arial', sans-serif" font-size="24" font-weight="600" fill="#3b82f6" letter-spacing="0.3px">
+    <tspan font-size="24">A</tspan>
+    <tspan font-size="24">zər</tspan>
+    <tspan font-size="24">E</tspan>
+    <tspan font-size="24">nerji</tspan>
+  </text>
+  
+  <!-- Trademark symbol (®) in top-right -->
+  <text x="185" y="18" font-family="Arial, sans-serif" font-size="9" fill="#3b82f6" font-weight="normal">®</text>
+</svg>
