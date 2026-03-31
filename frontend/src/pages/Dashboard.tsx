@@ -2128,12 +2128,7 @@ export default function Dashboard() {
                                   <div className="text-[10px] text-neutral-500 uppercase">Defects found</div>
                                   <div className="text-lg font-semibold text-red-400">{defectsFound}</div>
                                 </div>
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-2">
-                                  <div className="text-[10px] text-neutral-500 uppercase">Avg confidence</div>
-                                  <div className="text-lg font-semibold text-cyan-400">
-                                    {avgPct != null ? `${avgPct}%` : "—"}
-                                  </div>
-                                </div>
+                                
                               </div>
 
                               {cur && (
@@ -2157,12 +2152,7 @@ export default function Dashboard() {
                                       Defects:{" "}
                                       <span className="text-emerald-400 font-semibold">{curDefects}</span>
                                     </span>
-                                    <span>
-                                      Avg confidence:{" "}
-                                      <span className="text-cyan-400 font-semibold">
-                                        {Math.round(curAvg * 100)}%
-                                      </span>
-                                    </span>
+                                    
                                     {procMs != null && (
                                       <span>
                                         Time:{" "}

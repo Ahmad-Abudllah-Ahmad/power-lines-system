@@ -67,7 +67,7 @@ RESULTS_DIR = Path(__file__).parent / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
 # HTTP listen port (override when 8000 is already in use, e.g. `set PORT=8001`)
-SERVER_PORT = int(os.environ.get("PORT", "8000"))
+SERVER_PORT = int(os.environ.get("PORT", "8001"))
 
 GPU_BATCH = 32          # frames per YOLO batch on CUDA (lower if CUDA OOM; uses FP16 when USE_HALF)
 READ_AHEAD = 128        # decode-ahead queue so GPU batches stay full during video

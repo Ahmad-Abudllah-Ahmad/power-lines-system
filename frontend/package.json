@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n backend,frontend \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd ../backend && venv\\Scripts\\python.exe server.py",
-    "dev:frontend": "wait-on tcp:127.0.0.1:8000 && vite",
+    "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
