@@ -72,11 +72,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       <header className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-4 md:px-6 bg-[#0f1419]/95 border-b border-neutral-800 backdrop-blur-sm">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 w-[260px] md:w-[320px]">
             <img
               src="/azerenerji-logo.png"
               alt="AzərEnerji Logo"
-              className="h-20 md:h-24 w-auto object-contain"
+              className="h-24 md:h-32 w-auto object-contain"
             />
           </div>
         </div>
@@ -102,7 +102,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <XCircle size={14} />
             )}
             <span className="hidden sm:inline">
-              {apiHealth.healthy ? (apiHealth.latency != null ? `${apiHealth.latency}ms` : "Online") : "Offline"}
+              {apiHealth.healthy ? "Online" : "Offline"}
             </span>
           </div>
           <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-neutral-700">

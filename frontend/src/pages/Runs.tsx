@@ -14,6 +14,7 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  MessageSquare,
   Search,
   Filter,
   Copy,
@@ -74,6 +75,91 @@ type RunEntry = {
   _created_ts?: number;
   files: FileInfo[];
 };
+
+function safeIdFromLabel(label: string) {
+  const base = (label || "COMPONENT")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 18);
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${base}-${rand}`;
+}
+
+function defectBlurb(labelRaw: string) {
+  const label = (labelRaw || "").toLowerCase();
+  const canned: Array<{ match: RegExp; text: string }> = [
+    {
+      match: /insulator|disc|string/,
+      text: "Localized surface tracking and material degradation are consistent with contamination-driven stress. Recommend close inspection for cracks, glazing damage, and evidence of partial discharge.",
+    },
+    {
+      match: /corona|arcing|flashover/,
+      text: "Pattern suggests discharge activity and possible flashover residue. Recommend verifying clearances, checking for sharp edges/loose hardware, and scheduling cleaning and immediate corrective action if activity persists.",
+    },
+    {
+      match: /bolt|nut|hardware|clamp/,
+      text: "Anomaly indicates potential loosening, deformation, or corrosion. Recommend torque verification, corrosion treatment, and replacement if mechanical integrity is compromised.",
+    },
+    {
+      match: /rust|corrosion/,
+      text: "Corrosion signatures may indicate coating failure and moisture ingress. Recommend surface preparation and protective treatment; replace components showing advanced section loss.",
+    },
+    {
+      match: /crack|fracture|broken|chip/,
+      text: "Visible discontinuity suggests structural damage. Recommend urgent replacement or reinforcement to reduce risk of mechanical failure under load and weather events.",
+    },
+  ];
+  const hit = canned.find((c) => c.match.test(label));
+  return (
+    hit?.text ??
+    "Defect signature deviates from baseline geometry and texture. Recommend field verification and corrective maintenance based on severity, location, and asset criticality."
+  );
+}
+
+async function loadImage(url: string) {
+  return await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = document.createElement("img");
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("image_load_failed"));
+    img.src = url;
+  });
+}
+
+async function fetchAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("read_failed"));
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function cropDataUrl(img: HTMLImageElement, bbox: number[]) {
+  const [x1, y1, x2, y2] = bbox;
+  const ix1 = Math.max(0, Math.min(img.naturalWidth - 1, Math.floor(Math.min(x1, x2))));
+  const iy1 = Math.max(0, Math.min(img.naturalHeight - 1, Math.floor(Math.min(y1, y2))));
+  const ix2 = Math.max(ix1 + 1, Math.min(img.naturalWidth, Math.ceil(Math.max(x1, x2))));
+  const iy2 = Math.max(iy1 + 1, Math.min(img.naturalHeight, Math.ceil(Math.max(y1, y2))));
+  const w = Math.max(1, ix2 - ix1);
+  const h = Math.max(1, iy2 - iy1);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, ix1, iy1, w, h, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
 
 function copyRunId(runId: string) {
   navigator.clipboard.writeText(runId).then(
@@ -162,6 +248,9 @@ export default function Runs() {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(() => new Set());
   const [previewRun, setPreviewRun] = useState<RunEntry | null>(null);
   const [previewFileIdx, setPreviewFileIdx] = useState(0);
   const [videoFetchedDetections, setVideoFetchedDetections] = useState<any[]>([]);
@@ -184,6 +273,78 @@ export default function Runs() {
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const appliedBatchRef = useRef<string | null>(null);
   const [previewImageDims, setPreviewImageDims] = useState({ w: 0, h: 0 });
+  const [fileReviewStatusByRun, setFileReviewStatusByRun] = useState<Record<string, Record<string, "approved" | "canceled" | undefined>>>(() => {
+    try {
+      const raw = localStorage.getItem("runs_file_review_status_v1");
+      const parsed = raw ? (JSON.parse(raw) as Record<string, Record<string, "approved" | "canceled" | undefined>>) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [fileCommentByRun, setFileCommentByRun] = useState<Record<string, Record<string, string>>>(() => {
+    try {
+      const raw = localStorage.getItem("runs_file_comments_v1");
+      const parsed = raw ? (JSON.parse(raw) as Record<string, Record<string, string>>) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [activeCommentEditorKey, setActiveCommentEditorKey] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState<string>("");
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("runs_file_review_status_v1", JSON.stringify(fileReviewStatusByRun));
+    } catch {
+      /* ignore */
+    }
+  }, [fileReviewStatusByRun]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("runs_file_comments_v1", JSON.stringify(fileCommentByRun));
+    } catch {
+      /* ignore */
+    }
+  }, [fileCommentByRun]);
+
+  const setFileReviewStatus = useCallback((runId: string, fileKey: string, status: "approved" | "canceled" | undefined) => {
+    setFileReviewStatusByRun((prev) => {
+      const next = { ...prev };
+      const curRun = { ...(next[runId] || {}) };
+      if (status) curRun[fileKey] = status;
+      else delete curRun[fileKey];
+      next[runId] = curRun;
+      return next;
+    });
+  }, []);
+
+  const setFileComment = useCallback((runId: string, fileKey: string, comment: string) => {
+    setFileCommentByRun((prev) => {
+      const next = { ...prev };
+      const curRun = { ...(next[runId] || {}) };
+      const v = (comment || "").trim();
+      if (v) curRun[fileKey] = v;
+      else delete curRun[fileKey];
+      next[runId] = curRun;
+      return next;
+    });
+  }, []);
+
+  const runCreatedTs = useCallback((r: Pick<RunEntry, "created_at">): number | null => {
+    const ts = r.created_at;
+    if (!ts) return null;
+    if (typeof ts === "string") {
+      const d = new Date(ts);
+      const t = d.getTime();
+      return Number.isFinite(t) ? t : null;
+    }
+    if (!Number.isFinite(ts)) return null;
+    return ts > 1e12 ? ts : ts * 1000;
+  }, []);
 
   const fetchRuns = useCallback(async () => {
     try {
@@ -233,6 +394,18 @@ export default function Runs() {
     if (typeFilter !== "all" && runDisplayType(r) !== typeFilter) return false;
     if (statusFilter === "complete" && !isRunBatchComplete(r.status)) return false;
     if (statusFilter === "active" && isRunBatchComplete(r.status)) return false;
+    if (dateFrom || dateTo) {
+      const t = runCreatedTs(r);
+      if (t == null) return false;
+      if (dateFrom) {
+        const from = new Date(`${dateFrom}T00:00:00`).getTime();
+        if (Number.isFinite(from) && t < from) return false;
+      }
+      if (dateTo) {
+        const to = new Date(`${dateTo}T23:59:59.999`).getTime();
+        if (Number.isFinite(to) && t > to) return false;
+      }
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const matchId = r.run_id.toLowerCase().includes(q);
@@ -241,6 +414,244 @@ export default function Runs() {
     }
     return true;
   });
+
+  const selectedCount = selectedRunIds.size;
+  const toggleSelectedRun = useCallback((runId: string) => {
+    setSelectedRunIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(runId)) next.delete(runId);
+      else next.add(runId);
+      return next;
+    });
+  }, []);
+
+  const generateSelectedReport = useCallback(async () => {
+    const selected = runs.filter((r) => selectedRunIds.has(r.run_id));
+    if (selected.length === 0) return;
+
+    const brandLogoUrl = `${window.location.origin}/azerenerji-logo.png`;
+    const brandLogoSrc = (await fetchAsDataUrl(brandLogoUrl)) || brandLogoUrl;
+    const today = new Date();
+    const inspectionDate = today.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "2-digit" });
+
+    const perRunSections: string[] = [];
+
+    for (const run of selected) {
+      const dtype = runDisplayType(run);
+      const createdIso =
+        typeof run.created_at === "string"
+          ? run.created_at
+          : new Date((runCreatedTs(run) ?? Date.now())).toISOString();
+
+      const defectCards: string[] = [];
+
+      if (dtype === "video") {
+        defectCards.push(
+          `<div class="bg-yellow-50 border-l-4 border-yellow-500 p-4">
+             <h3 class="font-bold text-yellow-800 mb-1">Note</h3>
+             <p class="text-sm text-yellow-900">This batch contains video items. Cropped defect comparisons are generated for image-based detections only.</p>
+           </div>`
+        );
+      }
+
+      const approvedMap = fileReviewStatusByRun[run.run_id] || {};
+      const approvedComments = fileCommentByRun[run.run_id] || {};
+      const imageFiles = run.files.filter((f) => {
+        const fileKey = (f.file_id || f.filename || "").trim();
+        if (!fileKey) return false;
+        if (approvedMap[fileKey] !== "approved") return false;
+        return Boolean(f.annotated_url || f.thumb_url);
+      });
+      for (const f of imageFiles) {
+        const dets = Array.isArray(f.detections) ? f.detections : [];
+        const boxes = dets
+          .map((d: any) => ({
+            label: String(d?.class_name ?? d?.label ?? "Defect"),
+            conf: typeof d?.confidence === "number" ? d.confidence : typeof d?.conf === "number" ? d.conf : null,
+            bbox: Array.isArray(d?.bbox) ? d.bbox : null,
+          }))
+          .filter((d) => Array.isArray(d.bbox) && d.bbox.length >= 4);
+
+        if (boxes.length === 0) continue;
+
+        const healthyUrl = (f.thumb_url || f.annotated_url || "").trim();
+        const defectUrl = (f.annotated_url || f.thumb_url || "").trim();
+        if (!healthyUrl || !defectUrl) continue;
+
+        let healthyImg: HTMLImageElement | null = null;
+        let defectImg: HTMLImageElement | null = null;
+        try {
+          [healthyImg, defectImg] = await Promise.all([loadImage(healthyUrl), loadImage(defectUrl)]);
+        } catch {
+          continue;
+        }
+
+        const fileKey = (f.file_id || f.filename || "").trim();
+        const humanComment = fileKey ? (approvedComments[fileKey] || "").trim() : "";
+
+        for (const b of boxes) {
+          const bbox = b.bbox as number[];
+          const healthyCrop = healthyImg ? cropDataUrl(healthyImg, bbox) : null;
+          const defectCrop = defectImg ? cropDataUrl(defectImg, bbox) : null;
+          if (!healthyCrop || !defectCrop) continue;
+
+          const label = b.label || "Defect";
+          const componentId = safeIdFromLabel(label);
+
+          defectCards.push(
+            `
+            <section class="mb-10">
+              <h2 class="text-lg font-bold text-blue-900 uppercase mb-4 border-b-2 border-gray-100 pb-2">Visual Assessment (Side-by-Side)</h2>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="flex flex-col">
+                  <div class="bg-gray-100 p-2 rounded-t-lg border border-gray-300 border-b-0">
+                    <h3 class="font-bold text-green-700 text-center uppercase tracking-wide text-sm">Reference: Healthy State</h3>
+                  </div>
+                  <div class="border border-gray-300 bg-white relative h-64 md:h-80 overflow-hidden flex items-center justify-center">
+                    <img src="${healthyCrop}" alt="Healthy crop" class="object-contain w-full h-full bg-white">
+                    <span class="absolute bottom-3 left-3 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">Original crop</span>
+                  </div>
+                  <div class="border border-gray-300 border-t-0 p-4 rounded-b-lg bg-gray-50">
+                    <p class="text-sm text-gray-700">Baseline visual condition for this localized region (no annotation overlay). Used for comparison.</p>
+                  </div>
+                </div>
+                <div class="flex flex-col">
+                  <div class="bg-red-50 p-2 rounded-t-lg border border-red-300 border-b-0">
+                    <h3 class="font-bold text-red-700 text-center uppercase tracking-wide text-sm">Current: Defective State</h3>
+                  </div>
+                  <div class="border border-red-300 bg-white relative h-64 md:h-80 overflow-hidden flex items-center justify-center">
+                    <img src="${defectCrop}" alt="Defect crop" class="object-contain w-full h-full bg-white">
+                    <span class="absolute bottom-3 left-3 bg-red-700 bg-opacity-90 text-white text-xs px-2 py-1 rounded">Annotated crop</span>
+                  </div>
+                  <div class="border border-red-300 border-t-0 p-4 rounded-b-lg bg-red-50">
+                    <p class="text-sm text-gray-800 font-medium">Defect detected: <span class="text-red-600">${label}</span></p>
+                  </div>
+                </div>
+              </div>
+              <section class="mt-8">
+                <h2 class="text-lg font-bold text-blue-900 uppercase mb-4 border-b-2 border-gray-100 pb-2">Defect Description & Maintenance Plan</h2>
+                <div class="space-y-4">
+                  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 bg-gray-50 p-6 rounded-lg border border-gray-200">
+                    <div>
+                      <span class="block text-xs font-bold text-gray-500 uppercase">Component Name</span>
+                      <span class="block text-base font-semibold text-gray-900 mt-1">${label}</span>
+                    </div>
+                    <div>
+                      <span class="block text-xs font-bold text-gray-500 uppercase">Component ID</span>
+                      <span class="block text-base font-semibold text-gray-900 mt-1">${componentId}</span>
+                    </div>
+                    <div>
+                      <span class="block text-xs font-bold text-gray-500 uppercase">Batch / Run ID</span>
+                      <span class="block text-base font-semibold text-gray-900 mt-1">${run.run_id}</span>
+                    </div>
+                    <div>
+                      <span class="block text-xs font-bold text-gray-500 uppercase">Inspection Date</span>
+                      <span class="block text-base font-semibold text-gray-900 mt-1">${inspectionDate}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 class="font-semibold text-gray-800 text-md mb-2">Detailed Findings:</h3>
+                    <p class="text-gray-600 leading-relaxed text-sm text-justify">
+                      ${defectBlurb(label)}
+                    </p>
+                    <p class="text-xs text-gray-400 mt-2">Source file: ${String(f.filename || "—")}</p>
+                  </div>
+                  ${humanComment
+                    ? `<div class="bg-blue-50 border-l-4 border-blue-600 p-4">
+                         <h3 class="font-bold text-blue-900 mb-1">Human suggestion</h3>
+                         <p class="text-sm text-blue-950">${humanComment.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+                       </div>`
+                    : ""}
+                  <div class="bg-yellow-50 border-l-4 border-yellow-500 p-4">
+                    <h3 class="font-bold text-yellow-800 mb-1">Recommended Action: Priority Review</h3>
+                    <p class="text-sm text-yellow-900">
+                      Schedule field verification for the affected component area and apply corrective maintenance based on severity and asset criticality.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            </section>
+            `
+          );
+        }
+      }
+
+      if (defectCards.length === 0) {
+        defectCards.push(
+          `<div class="bg-gray-50 border border-gray-200 p-6 rounded-lg">
+             <p class="text-sm text-gray-700">No approved needed.</p>
+           </div>`
+        );
+      }
+
+      perRunSections.push(
+        `
+        <div class="max-w-5xl mx-auto bg-white p-8 md:p-12 shadow-xl border border-gray-200 mb-10">
+          <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b-4 border-blue-900 pb-6 mb-8">
+            <div>
+              <h1 class="text-3xl font-extrabold text-gray-900 uppercase tracking-wide">Component Defect Report</h1>
+              <p class="text-gray-500 mt-1 font-medium">Transmission Line Asset Management</p>
+              <p class="text-xs text-gray-400 mt-2">Batch: <span class="font-mono">${run.run_id}</span> • Type: ${dtype.toUpperCase()} • Created: ${createdIso}</p>
+            </div>
+            <div class="mt-4 md:mt-0 text-right">
+              <img src="${brandLogoSrc}" alt="AzərEnerji" class="h-12 md:h-14 w-auto object-contain ml-auto" />
+            </div>
+          </header>
+          ${defectCards.join("\n")}
+          <footer class="mt-12 pt-8 border-t-2 border-gray-300 flex flex-col md:flex-row justify-between items-end gap-8">
+            <div class="w-full md:w-auto">
+              <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Official Report Generated By</p>
+              <div class="flex items-center gap-3">
+                <img src="${brandLogoSrc}" alt="AzərEnerji" class="h-9 w-auto object-contain" />
+              </div>
+            </div>
+            <div class="flex flex-col md:flex-row gap-8 w-full md:w-auto">
+              <div class="w-full md:w-48">
+                <div class="border-b border-gray-800 h-10 mb-2"></div>
+                <p class="text-center text-xs font-semibold text-gray-600 uppercase">Inspecting Engineer</p>
+              </div>
+              <div class="w-full md:w-48">
+                <div class="border-b border-gray-800 h-10 mb-2"></div>
+                <p class="text-center text-xs font-semibold text-gray-600 uppercase">Sector Supervisor Approval</p>
+              </div>
+            </div>
+          </footer>
+        </div>
+        `
+      );
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Component Defect Report - Azerenerji</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      body { background-color: white; }
+      .print-shadow-none { box-shadow: none !important; }
+      .print-m-0 { margin: 0 !important; }
+      .print-p-0 { padding: 0 !important; }
+      a { text-decoration: none; color: inherit; }
+    }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans p-4 md:p-8">
+  ${perRunSections.join("\n")}
+</body>
+</html>`;
+
+    const w = window.open("", "_blank");
+    if (!w) {
+      toast.error("Popup blocked. Allow popups to generate the report.", 4000);
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }, [runs, selectedRunIds, runCreatedTs, fileReviewStatusByRun, fileCommentByRun]);
 
   const openPreview = (run: RunEntry, fileIdx = 0) => {
     setPreviewRun(run);
@@ -484,10 +895,29 @@ export default function Runs() {
           <h1 className="text-3xl font-bold text-white mb-2">Recent Uploads</h1>
           <p className="text-neutral-400">All uploaded images and videos with detection results</p>
         </div>
-        <button onClick={() => { setLoading(true); fetchRuns(); }}
-          className="flex items-center gap-2 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-white px-4 py-2 text-sm font-semibold hover:bg-neutral-700 transition-colors">
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => generateSelectedReport()}
+            disabled={selectedCount === 0}
+            className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
+              selectedCount === 0
+                ? "bg-neutral-800/60 border-neutral-700 text-neutral-500 cursor-not-allowed"
+                : "bg-cyan-500/20 border-cyan-500/50 text-cyan-200 hover:bg-cyan-500/30"
+            }`}
+            title={selectedCount === 0 ? "Select one or more batches to generate a report" : `Generate report for ${selectedCount} batch(es)`}
+          >
+            Generate report {selectedCount > 0 ? `(${selectedCount})` : ""}
+          </button>
+          <button
+            onClick={() => {
+              setLoading(true);
+              fetchRuns();
+            }}
+            className="flex items-center gap-2 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-white px-4 py-2 text-sm font-semibold hover:bg-neutral-700 transition-colors"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -514,6 +944,23 @@ export default function Runs() {
               <option value="active">Processing</option>
               <option value="complete">Completed</option>
             </select>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="rounded-xl bg-neutral-800 border border-neutral-700 text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+                aria-label="From date"
+              />
+              <span className="text-neutral-500 text-xs">to</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="rounded-xl bg-neutral-800 border border-neutral-700 text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+                aria-label="To date"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -566,6 +1013,7 @@ export default function Runs() {
               ) : (
                 filtered.map((run, i) => {
                   const dtype = runDisplayType(run);
+                  const isSelected = selectedRunIds.has(run.run_id);
                   return (
                     <motion.tr key={run.run_id}
                       ref={(el) => {
@@ -581,6 +1029,17 @@ export default function Runs() {
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              toggleSelectedRun(run.run_id);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-4 w-4 accent-cyan-500"
+                            aria-label={`Select batch ${run.run_id}`}
+                          />
                           <span className="font-mono text-white text-xs truncate max-w-[120px]" title={run.run_id}>{run.run_id}</span>
                           <button onClick={e => { e.stopPropagation(); copyRunId(run.run_id); }}
                             className="p-1 rounded text-neutral-500 hover:text-white hover:bg-neutral-700 transition-colors" title="Copy">
@@ -909,13 +1368,21 @@ export default function Runs() {
                 {previewRun.files.map((f, idx) => {
                   const cIdx = completedFiles.indexOf(f);
                   const isActive = cIdx === previewFileIdx;
+                  const fileKey = (f.file_id || f.filename || `${idx}`).trim();
+                  const reviewStatus = (fileReviewStatusByRun[previewRun.run_id] || {})[fileKey];
+                  const comment = (fileCommentByRun[previewRun.run_id] || {})[fileKey] || "";
+                  const editorKey = `${previewRun.run_id}::${fileKey}`;
+                  const editorOpen = activeCommentEditorKey === editorKey;
                   return (
-                    <button key={f.file_id || `${f.filename}-${idx}`}
-                      onClick={() => { if (cIdx >= 0) setPreviewFileIdx(cIdx); }}
-                      className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
-                        isActive ? "bg-cyan-500/20 border border-cyan-500/50" : "hover:bg-neutral-800 border border-transparent"
-                      } ${f.status !== "done" ? "opacity-50 cursor-default" : "cursor-pointer"}`}
-                    >
+                    <div key={f.file_id || `${f.filename}-${idx}`} className="w-full">
+                      <button
+                        onClick={() => {
+                          if (cIdx >= 0) setPreviewFileIdx(cIdx);
+                        }}
+                        className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
+                          isActive ? "bg-cyan-500/20 border border-cyan-500/50" : "hover:bg-neutral-800 border border-transparent"
+                        } ${f.status !== "done" ? "opacity-50 cursor-default" : "cursor-pointer"}`}
+                      >
                       {f.thumb_url ? (
                         <img src={f.thumb_url} className="w-8 h-8 rounded object-cover flex-shrink-0" alt="" />
                       ) : (
@@ -937,10 +1404,120 @@ export default function Runs() {
                           )}
                         </div>
                       </div>
+                      {f.status === "done" && (
+                        <div className="flex items-center gap-1 min-w-[190px] justify-end">
+                          {reviewStatus === "approved" ? (
+                            <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                              Approved
+                            </span>
+                          ) : reviewStatus === "canceled" ? (
+                            <span className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300">
+                              Canceled
+                            </span>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (editorOpen) {
+                                setActiveCommentEditorKey(null);
+                                return;
+                              }
+                              setActiveCommentEditorKey(editorKey);
+                              setCommentDraft(comment || "");
+                            }}
+                            className="rounded-md border border-neutral-700 bg-neutral-800/60 px-2 py-1 text-neutral-300 hover:text-white hover:bg-neutral-700/60 transition-colors"
+                            title="Comment"
+                            aria-label="Comment"
+                          >
+                            <MessageSquare size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFileReviewStatus(previewRun.run_id, fileKey, "approved");
+                            }}
+                            className={`rounded-md border px-2 py-1 transition-colors ${
+                              reviewStatus === "approved"
+                                ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
+                                : "border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:text-white hover:bg-neutral-700/60"
+                            }`}
+                            title="Approve"
+                            aria-label="Approve"
+                          >
+                            <CheckCircle2 size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFileReviewStatus(previewRun.run_id, fileKey, "canceled");
+                            }}
+                            className={`rounded-md border px-2 py-1 transition-colors ${
+                              reviewStatus === "canceled"
+                                ? "border-red-500/60 bg-red-500/15 text-red-200"
+                                : "border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:text-white hover:bg-neutral-700/60"
+                            }`}
+                            title="Cancel"
+                            aria-label="Cancel"
+                          >
+                            <XCircle size={14} />
+                          </button>
+                        </div>
+                      )}
                       {f.status === "done" && <CheckCircle2 size={12} className="text-green-400 flex-shrink-0" />}
                       {f.status === "processing" && <Clock size={12} className="text-amber-400 animate-spin flex-shrink-0" />}
                       {f.status === "error" && <XCircle size={12} className="text-red-400 flex-shrink-0" />}
-                    </button>
+                      </button>
+                      {f.status === "done" && (comment.trim() || editorOpen) ? (
+                        <div className="px-3 pb-3 -mt-1">
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-[11px] font-semibold text-neutral-300">Comment</div>
+                              {editorOpen ? (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setFileComment(previewRun.run_id, fileKey, commentDraft);
+                                      setActiveCommentEditorKey(null);
+                                    }}
+                                    className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-500/15 transition-colors"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setCommentDraft(comment || "");
+                                      setActiveCommentEditorKey(null);
+                                    }}
+                                    className="rounded-md border border-neutral-700 bg-neutral-800/60 px-2 py-1 text-[11px] font-semibold text-neutral-300 hover:text-white hover:bg-neutral-700/60 transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                            {editorOpen ? (
+                              <textarea
+                                value={commentDraft}
+                                onChange={(e) => setCommentDraft(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                rows={2}
+                                placeholder="Add a note for this image (will appear in the report as Human suggestion)"
+                                className="mt-2 w-full resize-none rounded-lg bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-500 px-3 py-2 text-[12px] outline-none focus:ring-2 focus:ring-cyan-500/40"
+                              />
+                            ) : (
+                              <div className="mt-2 text-[12px] text-neutral-300">{comment}</div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>

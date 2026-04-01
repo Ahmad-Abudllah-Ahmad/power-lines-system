@@ -1429,27 +1429,51 @@ export default function Dashboard() {
               <h3 className="text-sm font-semibold text-white mb-4">Uploads per day (last 14 days)</h3>
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={runsPerDay} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <BarChart data={runsPerDay} margin={{ top: 6, right: 6, left: -20, bottom: 0 }} barCategoryGap={10}>
                     <defs>
-                      <linearGradient id="runsGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.4} />
-                        <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
+                      <linearGradient id="uploadsBarGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.95} />
+                        <stop offset="65%" stopColor="#06b6d4" stopOpacity={0.65} />
+                        <stop offset="100%" stopColor="#0891b2" stopOpacity={0.35} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="date" stroke="#9ca3af" fontSize={11} />
-                    <YAxis stroke="#9ca3af" fontSize={11} allowDecimals={false} />
+                    <CartesianGrid strokeDasharray="2 6" stroke="rgba(148,163,184,0.18)" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      stroke="rgba(148,163,184,0.85)"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      stroke="rgba(148,163,184,0.85)"
+                      fontSize={11}
+                      allowDecimals={false}
+                      tickLine={false}
+                      axisLine={false}
+                      width={34}
+                    />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#1f2937",
-                        border: "1px solid #374151",
+                        backgroundColor: "rgba(15, 20, 25, 0.92)",
+                        border: "1px solid rgba(6, 182, 212, 0.35)",
                         borderRadius: "8px",
                         fontSize: "12px",
+                        boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
                       }}
-                      labelStyle={{ color: "#9ca3af" }}
+                      labelStyle={{ color: "rgba(226,232,240,0.9)" }}
+                      itemStyle={{ color: "rgba(226,232,240,0.92)" }}
+                      cursor={{ fill: "rgba(34,211,238,0.08)" }}
                     />
-                    <Area type="monotone" dataKey="runs" stroke="#06b6d4" fill="url(#runsGrad)" strokeWidth={2} />
-                  </AreaChart>
+                    <Bar
+                      dataKey="runs"
+                      name="Uploads"
+                      fill="url(#uploadsBarGrad)"
+                      radius={[10, 10, 6, 6]}
+                      stroke="rgba(34,211,238,0.35)"
+                      strokeWidth={1}
+                    />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </motion.div>
@@ -1464,6 +1488,12 @@ export default function Dashboard() {
                 {statusPie.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
+                      <defs>
+                        <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+                          <feDropShadow dx="0" dy="10" stdDeviation="10" floodColor="rgba(0,0,0,0.45)" />
+                          <feDropShadow dx="0" dy="0" stdDeviation="6" floodColor="rgba(34,211,238,0.20)" />
+                        </filter>
+                      </defs>
                       <Pie
                         data={statusPie}
                         cx="50%"
@@ -1473,20 +1503,42 @@ export default function Dashboard() {
                         paddingAngle={2}
                         dataKey="value"
                         nameKey="name"
-                        label={({ name, value }) => `${name}: ${value}`}
+                        label={({ cx, cy, midAngle, innerRadius, outerRadius, name, value }) => {
+                          const RAD = Math.PI / 180;
+                          const r = innerRadius + (outerRadius - innerRadius) * 0.62;
+                          const x = (cx as number) + r * Math.cos(-midAngle * RAD);
+                          const y = (cy as number) + r * Math.sin(-midAngle * RAD);
+                          return (
+                            <text
+                              x={x}
+                              y={y}
+                              textAnchor={x > (cx as number) ? "start" : "end"}
+                              dominantBaseline="central"
+                              fill="rgba(226,232,240,0.92)"
+                              fontSize={11}
+                              fontWeight={600}
+                              style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.55)", strokeWidth: 3 }}
+                            >
+                              {`${name} ${value}`}
+                            </text>
+                          );
+                        }}
                         labelLine={false}
                       >
                         {statusPie.map((entry, i) => (
-                          <Cell key={entry.name} fill={entry.color} />
+                          <Cell key={entry.name} fill={entry.color} stroke="rgba(226,232,240,0.14)" strokeWidth={1} />
                         ))}
                       </Pie>
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: "#1f2937",
-                          border: "1px solid #374151",
+                          backgroundColor: "rgba(15, 20, 25, 0.92)",
+                          border: "1px solid rgba(6, 182, 212, 0.35)",
                           borderRadius: "8px",
                           fontSize: "12px",
+                          boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
                         }}
+                        labelStyle={{ color: "rgba(226,232,240,0.9)" }}
+                        itemStyle={{ color: "rgba(226,232,240,0.92)" }}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1509,18 +1561,49 @@ export default function Dashboard() {
             <div className="h-44">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={runsPerDay} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="date" stroke="#9ca3af" fontSize={11} />
-                  <YAxis stroke="#9ca3af" fontSize={11} allowDecimals={false} />
+                  <defs>
+                    <linearGradient id="needsReviewBarGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.95} />
+                      <stop offset="70%" stopColor="#f59e0b" stopOpacity={0.65} />
+                      <stop offset="100%" stopColor="#b45309" stopOpacity={0.35} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="2 6" stroke="rgba(148,163,184,0.18)" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    stroke="rgba(148,163,184,0.85)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke="rgba(148,163,184,0.85)"
+                    fontSize={11}
+                    allowDecimals={false}
+                    tickLine={false}
+                    axisLine={false}
+                    width={34}
+                  />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#1f2937",
-                      border: "1px solid #374151",
+                      backgroundColor: "rgba(15, 20, 25, 0.92)",
+                      border: "1px solid rgba(245, 158, 11, 0.35)",
                       borderRadius: "8px",
                       fontSize: "12px",
+                      boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
                     }}
+                    labelStyle={{ color: "rgba(226,232,240,0.9)" }}
+                    itemStyle={{ color: "rgba(226,232,240,0.92)" }}
+                    cursor={{ fill: "rgba(245,158,11,0.10)" }}
                   />
-                  <Bar dataKey="mustReview" name="Needs review" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  <Bar
+                    dataKey="mustReview"
+                    name="Needs review"
+                    fill="url(#needsReviewBarGrad)"
+                    radius={[10, 10, 6, 6]}
+                    stroke="rgba(251,191,36,0.25)"
+                    strokeWidth={1}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
