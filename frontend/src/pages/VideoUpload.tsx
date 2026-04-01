@@ -652,111 +652,20 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
 
         {/* Config */}
         <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
-          <div className="flex items-center gap-2 mb-6">
-            <SlidersHorizontal className="text-premium-accent text-xl" />
-            <div className="font-semibold text-white text-lg">Detection Configuration</div>
-          </div>
-          <div className="space-y-5">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">Model Weights</div>
-              </div>
-              <select
-                value={selectedModel}
-                onChange={e => setSelectedModel(e.target.value)}
-                disabled={processing}
-                className="w-full rounded-lg bg-premium-card border border-neutral-700 text-white px-3 py-2 text-sm focus:ring-2 focus:ring-premium-accent outline-none disabled:opacity-50"
-              >
-                {availableModels.map(m => (
-                  <option key={m.id} value={m.id}>{m.title} — {m.description}</option>
-                ))}
-              </select>
-              <div className="mt-3 rounded-lg border border-neutral-800 bg-neutral-900/70 p-3">
-                <div className="text-xs font-medium uppercase tracking-wide text-neutral-400">Available Weights</div>
-                <div className="mt-2 space-y-2">
-                  {availableModels.map(m => (
-                    <div
-                      key={`${m.id}_summary`}
-                      className={`rounded-md border px-3 py-2 text-sm ${
-                        selectedModel === m.id
-                          ? "border-cyan-500/60 bg-cyan-500/10 text-white"
-                          : "border-neutral-800 bg-neutral-950/60 text-neutral-300"
-                      }`}
-                    >
-                      <div className="font-medium">{m.title}</div>
-                      <div className="text-xs text-neutral-400">{m.description}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+  <div className="rounded-xl border border-neutral-700 bg-premium-card/30 p-4">
+    <div className="flex items-center gap-2 mb-3">
+      <Sparkles className="text-premium-accent" size={16} />
+      <div className="text-sm font-semibold text-white">GPU-Accelerated Pipeline</div>
+    </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">Frame Interval</div>
-                <span className="text-sm font-mono text-premium-accent">{config.frameInterval}s</span>
-              </div>
-              <input type="range" min="1" max="10" step="1" value={config.frameInterval}
-                onChange={e => setConfig(p => ({ ...p, frameInterval: parseInt(e.target.value) }))}
-                disabled={processing}
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-700 accent-cyan-500 disabled:opacity-50" />
-              <div className="flex justify-between text-xs text-neutral-500 mt-1"><span>1s (detailed)</span><span>10s (fast)</span></div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">Confidence Threshold</div>
-                <span className="text-sm font-mono text-premium-accent">{config.confidence.toFixed(2)}</span>
-              </div>
-              <input type="range" min="5" max="95" step="5" value={Math.round(config.confidence * 100)}
-                onChange={e => setConfig(p => ({ ...p, confidence: parseInt(e.target.value) / 100 }))}
-                disabled={processing}
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-700 accent-cyan-500 disabled:opacity-50" />
-              <div className="flex justify-between text-xs text-neutral-500 mt-1"><span>0.05</span><span>0.95</span></div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">SAHI Slice Size</div>
-                <span className="text-sm font-mono text-premium-accent">{config.sliceSize}px</span>
-              </div>
-              <select value={config.sliceSize}
-                onChange={e => setConfig(p => ({ ...p, sliceSize: parseInt(e.target.value) }))}
-                disabled={processing}
-                className="w-full rounded-lg bg-premium-card border border-neutral-700 text-white px-3 py-2 text-sm focus:ring-2 focus:ring-premium-accent outline-none disabled:opacity-50">
-                <option value="256">256px (Fine)</option>
-                <option value="512">512px</option>
-                <option value="640">640px (Default)</option>
-                <option value="1024">1024px (Fast)</option>
-              </select>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">SAHI Overlap</div>
-                <span className="text-sm font-mono text-premium-accent">{config.overlap.toFixed(2)}</span>
-              </div>
-              <input type="range" min="10" max="50" step="5" value={Math.round(config.overlap * 100)}
-                onChange={e => setConfig(p => ({ ...p, overlap: parseInt(e.target.value) / 100 }))}
-                disabled={processing}
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-700 accent-cyan-500 disabled:opacity-50" />
-              <div className="flex justify-between text-xs text-neutral-500 mt-1"><span>0.10</span><span>0.50</span></div>
-            </div>
-
-            <div className="rounded-xl border border-neutral-700 bg-premium-card/30 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Sparkles className="text-premium-accent" size={16} />
-                <div className="text-sm font-semibold text-white">GPU-Accelerated Pipeline</div>
-              </div>
-              <div className="space-y-1.5 text-xs text-neutral-300">
-                <div>1. Upload video &rarr; extract frames at interval</div>
-                <div>2. Run YOLO detection on GPU per sampled frame</div>
-                <div>3. Annotate every frame with detections</div>
-                <div>4. Re-encode annotated MP4 for playback</div>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div className="space-y-1.5 text-xs text-neutral-300">
+      <div>1. Upload video &rarr; extract frames at interval</div>
+      <div>2. Run YOLO detection on GPU per sampled frame</div>
+      <div>3. Annotate every frame with detections</div>
+      <div>4. Re-encode annotated MP4 for playback</div>
+    </div>
+  </div>
+</div>
       </div>
 
       {/* Processing Progress */}

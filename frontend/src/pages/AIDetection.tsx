@@ -708,123 +708,30 @@ export default function AIDetection() {
 
         {/* Config */}
         <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
-          <div className="flex items-center gap-2 mb-6">
-            <SlidersHorizontal className="text-premium-accent text-xl" />
-            <div className="font-semibold text-white text-lg">Detection Configuration</div>
+  <div className="rounded-xl border border-neutral-700 bg-premium-card/30 p-4">
+    <div className="flex items-center gap-2 mb-3">
+      <ChevronLeft className="text-premium-accent rotate-180" size={16} />
+      <div className="text-sm font-semibold text-white">Processing Pipeline</div>
+    </div>
+
+    <div className="space-y-2">
+      {[
+        "Frame extraction",
+        "YOLO full-image inference",
+        "SAHI sliced inference",
+        "NMS merge",
+        "Annotation & thumbnail",
+      ].map((step, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <div className="w-6 h-6 rounded-full bg-neutral-700 flex items-center justify-center text-xs font-bold text-neutral-400">
+            {i + 1}
           </div>
-          <div className="space-y-5">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">Model Weights</div>
-              </div>
-              <select
-                value={selectedModel}
-                onChange={e => setSelectedModel(e.target.value)}
-                disabled={processing}
-                className="w-full rounded-lg bg-premium-card border border-neutral-700 text-white px-3 py-2 text-sm focus:ring-2 focus:ring-premium-accent outline-none disabled:opacity-50"
-              >
-                {availableModels.map(m => (
-                  <option key={m.id} value={m.id}>{m.title} — {m.description}</option>
-                ))}
-              </select>
-              <div className="mt-3 rounded-lg border border-neutral-800 bg-neutral-900/70 p-3">
-                <div className="text-xs font-medium uppercase tracking-wide text-neutral-400">Available Weights</div>
-                <div className="mt-2 space-y-2">
-                  {availableModels.map(m => (
-                    <div
-                      key={`${m.id}_summary`}
-                      className={`rounded-md border px-3 py-2 text-sm ${
-                        selectedModel === m.id
-                          ? "border-cyan-500/60 bg-cyan-500/10 text-white"
-                          : "border-neutral-800 bg-neutral-950/60 text-neutral-300"
-                      }`}
-                    >
-                      <div className="font-medium">{m.title}</div>
-                      <div className="text-xs text-neutral-400">{m.description}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">Confidence Threshold</div>
-                <span className="text-sm font-mono text-premium-accent">{config.confidence.toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min="5" max="95" step="5"
-                value={Math.round(config.confidence * 100)}
-                onChange={e => setConfig(prev => ({ ...prev, confidence: parseInt(e.target.value) / 100 }))}
-                disabled={processing}
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-700 accent-cyan-500 disabled:opacity-50"
-              />
-              <div className="flex justify-between text-xs text-neutral-500 mt-1"><span>0.05</span><span>0.95</span></div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">SAHI Slice Size</div>
-                <span className="text-sm font-mono text-premium-accent">{config.sliceSize}px</span>
-              </div>
-              <select
-                value={config.sliceSize}
-                onChange={e => setConfig(prev => ({ ...prev, sliceSize: parseInt(e.target.value) }))}
-                disabled={processing}
-                className="w-full rounded-lg bg-premium-card border border-neutral-700 text-white px-3 py-2 text-sm focus:ring-2 focus:ring-premium-accent outline-none disabled:opacity-50"
-              >
-                <option value="256">256px (Fine)</option>
-                <option value="512">512px</option>
-                <option value="640">640px (Default)</option>
-                <option value="1024">1024px (Fast)</option>
-                <option value="2048">2048px (Ultra Fast)</option>
-              </select>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-white">SAHI Overlap</div>
-                <span className="text-sm font-mono text-premium-accent">{config.overlap.toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min="10" max="50" step="5"
-                value={Math.round(config.overlap * 100)}
-                onChange={e => setConfig(prev => ({ ...prev, overlap: parseInt(e.target.value) / 100 }))}
-                disabled={processing}
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-700 accent-cyan-500 disabled:opacity-50"
-              />
-              <div className="flex justify-between text-xs text-neutral-500 mt-1"><span>0.10</span><span>0.50</span></div>
-            </div>
-
-            {/* Processing Pipeline */}
-            <div className="rounded-xl border border-neutral-700 bg-premium-card/30 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <ChevronLeft className="text-premium-accent rotate-180" size={16} />
-                <div className="text-sm font-semibold text-white">Processing Pipeline</div>
-              </div>
-              <div className="space-y-2">
-                {["Frame extraction", "YOLO full-image inference", "SAHI sliced inference", "NMS merge", "Annotation & thumbnail"].map((step, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="w-6 h-6 rounded-full bg-neutral-700 flex items-center justify-center text-xs font-bold text-neutral-400">{i + 1}</div>
-                    <span className="text-xs text-neutral-300">{step}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 rounded-xl bg-premium-card/50 border border-neutral-700 p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="text-premium-accent" />
-              <div className="text-sm font-semibold text-white">Key Features</div>
-            </div>
-            <ul className="mt-2 space-y-1.5 text-xs text-neutral-300">
-              <li className="flex items-start gap-2"><span className="text-premium-accent mt-0.5">•</span><span>Single click processing with automatic result display</span></li>
-              <li className="flex items-start gap-2"><span className="text-premium-accent mt-0.5">•</span><span>RGB images processed through the detection pipeline</span></li>
-              <li className="flex items-start gap-2"><span className="text-premium-accent mt-0.5">•</span><span>100% local processing - perfect for air-gapped environments</span></li>
-            </ul>
-          </div>
+          <span className="text-xs text-neutral-300">{step}</span>
         </div>
+      ))}
+    </div>
+  </div>
+</div>
       </div>
 
       {/* Progress */}

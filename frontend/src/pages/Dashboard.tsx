@@ -508,11 +508,23 @@ export default function Dashboard() {
     if (!recentRunIdsKey) return;
     const ids = recentRunIdsKey.split("|").filter(Boolean);
     let cancelled = false;
-
+  
     setRecentRunGallery((prev) => {
       const next = { ...prev };
+  
       for (const run of recentRuns) {
         const runId = run.run_id ?? run.id;
+        const isThermal = Boolean((run as unknown as { thermal_analysis_job?: boolean })?.thermal_analysis_job);
+  
+        if (isThermal) {
+          next[runId] = {
+            loading: true,
+            urls: prev[runId]?.urls ?? [],
+            filenames: prev[runId]?.filenames ?? [],
+          };
+          continue;
+        }
+  
         const embedded = extractUrlsFromRunPayload(run);
         if (embedded.urls.length > 0) {
           next[runId] = { loading: false, urls: embedded.urls, filenames: embedded.filenames };
@@ -524,40 +536,71 @@ export default function Dashboard() {
           };
         }
       }
+  
       return next;
     });
-
+  
     void Promise.all(
       ids.map(async (runId) => {
         const run = recentRuns.find((r) => (r.run_id ?? r.id) === runId);
-        const embedded = run ? extractUrlsFromRunPayload(run) : { urls: [] as string[], filenames: [] as string[] };
-        if (embedded.urls.length > 0) {
-          return;
-        }
-
+        const isThermal = Boolean((run as unknown as { thermal_analysis_job?: boolean })?.thermal_analysis_job);
+  
         let urls: string[] = [];
         let filenames: string[] = [];
+  
         try {
-          const items = await listOverlays(runId);
-          if (items.length > 0) {
-            urls = items.map((it) => overlayItemSrc(runId, it));
-            filenames = items.map((it) => it.filename);
+          if (isThermal) {
+            const res = await fetch(`/api/thermal/batch/results/${encodeURIComponent(runId)}`);
+            if (res.ok) {
+              const data = await res.json();
+              const results = Array.isArray(data?.results) ? data.results : [];
+  
+              urls = results
+                .map((r: any) =>
+                  resolveMediaSrc(
+                    r.original_image_url ||
+                    r.thermal_rjpeg_url ||
+                    r.thermal_image_url ||
+                    ""
+                  )
+                )
+                .filter(Boolean);
+  
+              filenames = results.map((r: any) => r.filename || r.file_id || "thermal");
+            }
           } else {
-            const detail = await getRun(runId);
-            const art = detail.artifacts;
-            const u =
-              art
-                ? resolveArtifactUrl(art, runId, "overlay") ||
-                  resolveArtifactUrl(art, runId, "annotated")
-                : undefined;
-            if (u) {
-              urls = [mediaUrl(u)];
-              filenames = ["preview"];
+            const embedded = run
+              ? extractUrlsFromRunPayload(run)
+              : { urls: [] as string[], filenames: [] as string[] };
+  
+            if (embedded.urls.length > 0) {
+              urls = embedded.urls;
+              filenames = embedded.filenames;
+            } else {
+              const items = await listOverlays(runId);
+              if (items.length > 0) {
+                urls = items.map((it) => overlayItemSrc(runId, it));
+                filenames = items.map((it) => it.filename);
+              } else {
+                const detail = await getRun(runId);
+                const art = detail.artifacts;
+                const u =
+                  art
+                    ? resolveArtifactUrl(art, runId, "overlay") ||
+                      resolveArtifactUrl(art, runId, "annotated")
+                    : undefined;
+  
+                if (u) {
+                  urls = [mediaUrl(u)];
+                  filenames = ["preview"];
+                }
+              }
             }
           }
         } catch {
           /* ignore */
         }
+  
         if (!cancelled) {
           setRecentRunGallery((prev) => ({
             ...prev,
@@ -566,6 +609,7 @@ export default function Dashboard() {
         }
       })
     );
+  
     return () => {
       cancelled = true;
     };
@@ -652,8 +696,10 @@ export default function Dashboard() {
     if (!run || !Boolean((run as unknown as { thermal_analysis_job?: boolean })?.thermal_analysis_job)) {
       return null;
     }
+  
     const galT = recentRunGallery[runId];
     const apiFilesT = (run as unknown as { files?: DashboardRunFile[] })?.files;
+  
     const syntheticT: DashboardRunFile[] =
       (galT?.urls ?? []).map((url, j) => ({
         filename: galT.filenames[j] || `Image ${j + 1}`,
@@ -662,6 +708,7 @@ export default function Dashboard() {
         detections: [],
         stats: { total_defects: 0, avg_confidence: 0 },
       })) ?? [];
+  
     const filesT: DashboardRunFile[] = apiFilesT?.length ? apiFilesT : syntheticT;
     const nT = filesT.length;
     const safeIdxT = nT === 0 ? 0 : Math.min(Math.max(0, recentBatchDetail.fileIndex), nT - 1);
@@ -669,18 +716,34 @@ export default function Dashboard() {
     const fname = galT?.filenames?.[safeIdxT] ?? curT?.filename ?? "";
     const results = thermalDetailResults;
     const fidT = curT?.file_id;
+  
     const tr =
       (fidT ? results?.find((r) => (r as { file_id?: string }).file_id === fidT) : undefined) ??
       results?.find((r) => (r as { filename?: string }).filename === fname) ??
       undefined;
-    const urlRaw = (tr?.thermal_image_url as string) || "";
-    const imgUrl = urlRaw ? resolveMediaSrc(urlRaw) : "";
+  
+    const originalUrlRaw =
+      (tr?.original_image_url as string) ||
+      (tr?.thermal_rjpeg_url as string) ||
+      "";
+  
+    const imgUrl = originalUrlRaw ? resolveMediaSrc(originalUrlRaw) : "";
+  
+    const visualizationUrlRaw =
+      (tr?.thermal_visualization_url as string) ||
+      (tr?.thermal_image_url as string) ||
+      "";
+  
+    const visualizationImgUrl = visualizationUrlRaw ? resolveMediaSrc(visualizationUrlRaw) : "";
+  
     const countDisplay = Math.max(nT, results?.length ?? 0);
+  
     return {
       runId,
       fname,
       tr,
       imgUrl,
+      visualizationImgUrl,
       safeIdxT,
       nT,
       countDisplay: countDisplay > 0 ? countDisplay : 1,
@@ -1933,14 +1996,26 @@ export default function Dashboard() {
                           const i = apiFiles.findIndex((f) => f.filename === filename);
                           if (i >= 0) fileIndex = i;
                         } else if (imageUrl || videoUrl) {
-                          const i = apiFiles.findIndex(
-                            (f) =>
+                          const i = apiFiles.findIndex((f) => {
+                            const fid = f.file_id;
+                            const thermalRow =
+                              thermalDetailResults?.find((r) => (r as { file_id?: string }).file_id === fid) as
+                                | {
+                                    original_image_url?: string;
+                                    thermal_rjpeg_url?: string;
+                                    thermal_image_url?: string;
+                                  }
+                                | undefined;
+                          
+                            return (
+                              resolveMediaSrc(thermalRow?.original_image_url) === imageUrl ||
+                              resolveMediaSrc(thermalRow?.thermal_rjpeg_url) === imageUrl ||
+                              resolveMediaSrc(thermalRow?.thermal_image_url) === imageUrl ||
                               resolveMediaSrc(f.annotated_url) === imageUrl ||
                               resolveMediaSrc(f.thumb_url) === imageUrl ||
-                              (videoUrl &&
-                                f.video_url &&
-                                resolveMediaSrc(f.video_url) === videoUrl)
-                          );
+                              (videoUrl && f.video_url && resolveMediaSrc(f.video_url) === videoUrl)
+                            );
+                          });
                           if (i >= 0) fileIndex = i;
                         }
                       } else {
@@ -1964,66 +2039,59 @@ export default function Dashboard() {
 
             {dashThermalDetail && (
               <ThermalAnalysisDetailModal
-                open
-                onClose={() => {
-                  setRecentBatchDetail(null);
-                  setDashThermalRoiActive(false);
-                  setDashThermalRoiStart(null);
-                  setDashThermalRoiEnd(null);
-                  setDashThermalRoiStats(null);
-                }}
-                filename={
-                  dashThermalDetail.fname ||
-                  (dashThermalDetail.tr as { filename?: string } | undefined)?.filename ||
-                  "Thermal"
-                }
-                thermalImageB64={
-                  (dashThermalDetail.tr as { thermal_image_base64_png?: string } | undefined)
-                    ?.thermal_image_base64_png || null
-                }
-                thermalImageUrl={dashThermalDetail.imgUrl || null}
-                stats={(dashThermalDetail.tr?.stats as ThermalStats) ?? null}
-                analysis={(dashThermalDetail.tr?.analysis as ThermalAnalysisData) ?? null}
-                unit={String(
-                  (dashThermalDetail.tr as { unit?: string } | undefined)?.unit ?? "Celsius"
-                )}
-                analysisConfiguration={{
-                  objectType: thermalDetailJobMeta?.object_type ?? null,
-                  paletteId: thermalDetailJobMeta?.palette ?? null,
-                }}
-                fileIndexDisplay={dashThermalDetail.safeIdxT}
-                fileCountDisplay={dashThermalDetail.countDisplay}
-                onPrev={() =>
-                  setRecentBatchDetail({
-                    runId: dashThermalDetail.runId,
-                    fileIndex: Math.max(0, dashThermalDetail.safeIdxT - 1),
-                  })
-                }
-                onNext={() =>
-                  setRecentBatchDetail({
-                    runId: dashThermalDetail.runId,
-                    fileIndex: Math.min(
-                      Math.max(0, dashThermalDetail.nT - 1),
-                      dashThermalDetail.safeIdxT + 1
-                    ),
-                  })
-                }
-                enableRoi
-                roiActive={dashThermalRoiActive}
-                onToggleRoi={() => {
-                  setDashThermalRoiActive((a) => !a);
-                  setDashThermalRoiStart(null);
-                  setDashThermalRoiEnd(null);
-                  setDashThermalRoiStats(null);
-                }}
-                roiStart={dashThermalRoiStart}
-                roiEnd={dashThermalRoiEnd}
-                roiStats={dashThermalRoiStats}
-                roiLoading={dashThermalRoiLoading}
-                onImageMouseDown={handleDashThermalRoiMouseDown}
-                onImageMouseUp={handleDashThermalRoiMouseUp}
-                loading={thermalDetailLoading}
-              />
+              open={Boolean(dashThermalDetail)}
+              onClose={() => setRecentBatchDetail(null)}
+              filename={
+                dashThermalDetail?.fname ||
+                (dashThermalDetail?.tr as { filename?: string } | undefined)?.filename ||
+                "Thermal"
+              }
+              thermalImageB64={undefined}
+              thermalImageUrl={dashThermalDetail?.imgUrl || null}
+              stats={(dashThermalDetail?.tr?.stats as ThermalStats) ?? null}
+              analysis={(dashThermalDetail?.tr?.analysis as ThermalAnalysisData) ?? null}
+              unit={String(
+                (dashThermalDetail?.tr as { unit?: string } | undefined)?.unit ?? "Celsius"
+              )}
+              analysisConfiguration={{
+                objectType: thermalDetailJobMeta?.object_type ?? null,
+                paletteId: thermalDetailJobMeta?.palette ?? null,
+              }}
+              fileIndexDisplay={dashThermalDetail?.safeIdxT ?? 0}
+              fileCountDisplay={dashThermalDetail?.countDisplay ?? 1}
+              onPrev={() =>
+                dashThermalDetail &&
+                setRecentBatchDetail({
+                  runId: dashThermalDetail.runId,
+                  fileIndex: Math.max(0, dashThermalDetail.safeIdxT - 1),
+                })
+              }
+              onNext={() =>
+                dashThermalDetail &&
+                setRecentBatchDetail({
+                  runId: dashThermalDetail.runId,
+                  fileIndex: Math.min(
+                    Math.max(0, dashThermalDetail.nT - 1),
+                    dashThermalDetail.safeIdxT + 1
+                  ),
+                })
+              }
+              enableRoi
+              roiActive={dashThermalRoiActive}
+              onToggleRoi={() => {
+                setDashThermalRoiActive((a) => !a);
+                setDashThermalRoiStart(null);
+                setDashThermalRoiEnd(null);
+                setDashThermalRoiStats(null);
+              }}
+              roiStart={dashThermalRoiStart}
+              roiEnd={dashThermalRoiEnd}
+              roiStats={dashThermalRoiStats}
+              roiLoading={dashThermalRoiLoading}
+              onImageMouseDown={handleDashThermalRoiMouseDown}
+              onImageMouseUp={handleDashThermalRoiMouseUp}
+              loading={thermalDetailLoading}
+            />
             )}
 
             {recentBatchDetail &&

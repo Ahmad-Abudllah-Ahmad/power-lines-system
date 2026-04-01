@@ -675,15 +675,38 @@ export default function Runs() {
     return null;
   })();
   const thermalB64 = (thermalResultRow?.thermal_image_base64_png as string) || null;
-  const thermalUrl =
-    (thermalResultRow?.thermal_image_url as string) || previewFile?.annotated_url || previewFile?.thumb_url || "";
-  const thermalUrlResolved = useMemo(() => resolveThermalFetchUrl(thermalUrl), [thermalUrl]);
-  const thermalRjpegUrl = (thermalResultRow?.thermal_rjpeg_url as string) || "";
-  const thermalRjpegResolved = useMemo(
-    () => (thermalRjpegUrl ? resolveThermalFetchUrl(thermalRjpegUrl) : ""),
-    [thermalRjpegUrl]
-  );
-  const thermalUnit = String(thermalResultRow?.unit ?? "Celsius");
+
+    const thermalOriginalUrl =
+      (thermalResultRow?.original_image_url as string) ||
+      (thermalResultRow?.thermal_rjpeg_url as string) ||
+      previewFile?.thumb_url ||
+      previewFile?.annotated_url ||
+      "";
+
+    const thermalOriginalUrlResolved = useMemo(
+      () => resolveThermalFetchUrl(thermalOriginalUrl),
+      [thermalOriginalUrl]
+    );
+
+    const thermalVisualizationUrl =
+      (thermalResultRow?.thermal_visualization_url as string) ||
+      (thermalResultRow?.thermal_image_url as string) ||
+      previewFile?.annotated_url ||
+      previewFile?.thumb_url ||
+      "";
+
+    const thermalVisualizationUrlResolved = useMemo(
+      () => resolveThermalFetchUrl(thermalVisualizationUrl),
+      [thermalVisualizationUrl]
+    );
+
+    const thermalRjpegUrl = (thermalResultRow?.thermal_rjpeg_url as string) || "";
+    const thermalRjpegResolved = useMemo(
+      () => (thermalRjpegUrl ? resolveThermalFetchUrl(thermalRjpegUrl) : ""),
+      [thermalRjpegUrl]
+    );
+
+    const thermalUnit = String(thermalResultRow?.unit ?? "Celsius");
 
   useEffect(() => {
     setThermalScanRoiActive(false);
@@ -694,7 +717,7 @@ export default function Runs() {
 
   useEffect(() => {
     setPreviewImageDims({ w: 0, h: 0 });
-  }, [previewRun?.run_id, previewFileIdx, previewFile?.annotated_url, isDjiThermalScanUpload]);
+  }, [previewRun?.run_id, previewFileIdx, thermalOriginalUrlResolved, isDjiThermalScanUpload]);
 
   const handleThermalScanRoiMouseDown = useCallback(
     (e: React.MouseEvent<HTMLImageElement>) => {
@@ -747,13 +770,23 @@ export default function Runs() {
             file = new File([blob], filename, { type: blob.type || "image/jpeg" });
           }
         }
-        if (!file && thermalUrlResolved) {
-          const res = await fetch(thermalUrlResolved);
+        
+        if (!file && thermalOriginalUrlResolved) {
+          const res = await fetch(thermalOriginalUrlResolved);
           if (res.ok) {
             const blob = await res.blob();
             file = new File([blob], filename, { type: blob.type || "image/jpeg" });
           }
         }
+        
+        if (!file && thermalVisualizationUrlResolved) {
+          const res = await fetch(thermalVisualizationUrlResolved);
+          if (res.ok) {
+            const blob = await res.blob();
+            file = new File([blob], filename, { type: blob.type || "image/jpeg" });
+          }
+        }
+        
         if (!file && thermalB64) {
           const res = await fetch(`data:image/png;base64,${thermalB64}`);
           const blob = await res.blob();
@@ -786,7 +819,8 @@ export default function Runs() {
       previewFile,
       thermalResultRow?.stats,
       thermalRjpegResolved,
-      thermalUrlResolved,
+      thermalOriginalUrlResolved,
+      thermalVisualizationUrlResolved,
       thermalB64,
       thermalUnit,
     ]
@@ -1154,32 +1188,32 @@ export default function Runs() {
                   compact
                 />
                 <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-                  <ThermalAnalysisDetailInner
-                    thermalImageB64={thermalB64}
-                    thermalImageUrl={thermalUrlResolved || null}
-                    stats={(thermalResultRow?.stats as ThermalStats) ?? null}
-                    analysis={(thermalResultRow?.analysis as ThermalAnalysisData) ?? null}
-                    unit={thermalUnit}
-                    analysisConfiguration={{
-                      objectType: thermalBatchJobMeta?.object_type ?? null,
-                      paletteId: thermalBatchJobMeta?.palette ?? null,
-                    }}
-                    loading={thermalBatchLoading}
-                    enableRoi
-                    roiActive={thermalScanRoiActive}
-                    onToggleRoi={() => {
-                      setThermalScanRoiActive((a) => !a);
-                      setThermalScanRoiStart(null);
-                      setThermalScanRoiEnd(null);
-                      setThermalScanRoiStats(null);
-                    }}
-                    roiStart={thermalScanRoiStart}
-                    roiEnd={thermalScanRoiEnd}
-                    roiStats={thermalScanRoiStats}
-                    roiLoading={thermalScanRoiLoading}
-                    onImageMouseDown={handleThermalScanRoiMouseDown}
-                    onImageMouseUp={handleThermalScanRoiMouseUp}
-                  />
+                <ThermalAnalysisDetailInner
+                  thermalImageB64={undefined}
+                  thermalImageUrl={thermalOriginalUrlResolved || null}
+                  stats={(thermalResultRow?.stats as ThermalStats) ?? null}
+                  analysis={(thermalResultRow?.analysis as ThermalAnalysisData) ?? null}
+                  unit={thermalUnit}
+                  analysisConfiguration={{
+                    objectType: thermalBatchJobMeta?.object_type ?? null,
+                    paletteId: thermalBatchJobMeta?.palette ?? null,
+                  }}
+                  loading={thermalBatchLoading}
+                  enableRoi
+                  roiActive={thermalScanRoiActive}
+                  onToggleRoi={() => {
+                    setThermalScanRoiActive((a) => !a);
+                    setThermalScanRoiStart(null);
+                    setThermalScanRoiEnd(null);
+                    setThermalScanRoiStats(null);
+                  }}
+                  roiStart={thermalScanRoiStart}
+                  roiEnd={thermalScanRoiEnd}
+                  roiStats={thermalScanRoiStats}
+                  roiLoading={thermalScanRoiLoading}
+                  onImageMouseDown={handleThermalScanRoiMouseDown}
+                  onImageMouseUp={handleThermalScanRoiMouseUp}
+                />
                 </div>
               </div>
             ) : (

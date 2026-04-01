@@ -40,8 +40,8 @@ export function StatCard({ label, value, sub, icon, gradient = "accent", trend }
       <div className="relative z-10">
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
-            <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-1">{label}</div>
-            <div className="text-3xl font-bold text-white mt-2 mb-1">{value}</div>
+            <div className="font-medium text-neutral-400 uppercase tracking-wider mb-1"style={{ fontSize: '16px' }}>{label}</div>
+            <div className="font-bold text-white mt-2 mb-1"style={{ fontSize: '16px' }}>{value}</div>
             {sub && (
               <div className="text-xs text-neutral-400 mt-2">{sub}</div>
             )}

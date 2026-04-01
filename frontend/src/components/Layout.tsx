@@ -12,7 +12,6 @@ import {
   IconMap2,
   IconClipboardList,
   IconSettings,
-  IconUser,
 } from "@tabler/icons-react";
 import { ToastContainer, useToast } from "./Toast";
 import { checkApiHealth } from "../api/api";
@@ -54,7 +53,9 @@ const dockItems: FloatingDockItem[] = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { toasts, remove } = useToast();
-  const [apiHealth, setApiHealth] = useState<{ healthy: boolean; latency?: number }>({ healthy: false });
+  const [apiHealth, setApiHealth] = useState<{ healthy: boolean; latency?: number }>({
+    healthy: false,
+  });
 
   useEffect(() => {
     const run = async () => {
@@ -66,57 +67,81 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return () => clearInterval(id);
   }, []);
 
+  const statusColor =
+    apiHealth.healthy
+      ? apiHealth.latency != null && apiHealth.latency > 2000
+        ? { bg: "bg-amber-500/10", border: "border-amber-500/40", text: "text-amber-400", dot: "bg-amber-400" }
+        : { bg: "bg-emerald-500/10", border: "border-emerald-500/40", text: "text-emerald-400", dot: "bg-emerald-400" }
+      : { bg: "bg-red-500/10", border: "border-red-500/40", text: "text-red-400", dot: "bg-red-500" };
+
   return (
     <div className="min-h-screen bg-[#0a0e1a] text-white relative overflow-x-hidden">
       <ToastContainer toasts={toasts} onRemove={remove} />
 
-      <header className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-4 md:px-6 bg-[#0f1419]/95 border-b border-neutral-800 backdrop-blur-sm">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3 w-[260px] md:w-[320px]">
+      {/* ── Header ── */}
+      <header className="fixed top-0 left-0 right-0 z-50 h-20 flex items-center justify-between px-5 md:px-8 bg-[#0d1117]/95 border-b border-white/[0.06] backdrop-blur-md">
+
+        {/* Left — Logo */}
+        <div className="flex items-center h-full py-3">
+          {/*
+            KEY FIX:
+            • No more nested fixed-size box trapping the image.
+            • The img itself is sized directly: h-9 (36px) gives it real height.
+            • py-1 on the wrapper provides top/bottom breathing room inside the header.
+            • object-contain preserves the aspect ratio so wide logos don't distort.
+          */}
+          <div className="flex items-center justify-center w-[200px] md:w-[240px] h-full px-4">
             <img
               src="/azerenerji-logo.png"
-              alt="AzərEnerji Logo"
-              className="h-24 md:h-32 w-auto object-contain"
+              alt="AzərEnerji"
+              style={{ width: "620px", height: "144px", objectFit: "contain", transform: "scale(1.3)", transformOrigin: "left" }}
+              className="w-full h-full object-contain scale-125"
             />
           </div>
         </div>
 
+        {/* Right — Status + User */}
         <div className="flex items-center gap-3">
+
+          {/* API health pill */}
           <div
-            className={`hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+            className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-all
+              ${statusColor.bg} ${statusColor.border} ${statusColor.text}`}
+            title={
               apiHealth.healthy
-                ? apiHealth.latency != null && apiHealth.latency > 2000
-                  ? "bg-amber-500/10 border-amber-500/50 text-amber-400"
-                  : "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
-                : "bg-red-500/10 border-red-500/50 text-red-400"
-            }`}
-            title={apiHealth.healthy ? `API OK${apiHealth.latency != null ? ` (${apiHealth.latency}ms)` : ""}` : "API offline"}
+                ? `API OK${apiHealth.latency != null ? ` · ${apiHealth.latency}ms` : ""}`
+                : "API offline"
+            }
           >
-            {apiHealth.healthy ? (
-              apiHealth.latency != null && apiHealth.latency > 2000 ? (
-                <AlertCircle size={14} />
-              ) : (
-                <CheckCircle2 size={14} />
-              )
-            ) : (
-              <XCircle size={14} />
-            )}
-            <span className="hidden sm:inline">
-              {apiHealth.healthy ? "Online" : "Offline"}
+            {/* Animated dot instead of icon — cleaner at small sizes */}
+            <span className={`w-1.5 h-1.5 rounded-full ${statusColor.dot} ${apiHealth.healthy ? "animate-pulse" : ""}`} />
+            <span>
+              {apiHealth.healthy
+                ? apiHealth.latency != null && apiHealth.latency > 2000
+                  ? `Slow · ${apiHealth.latency}ms`
+                  : "Online"
+                : "Offline"}
             </span>
           </div>
-          <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-neutral-700">
-            <div className="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center text-neutral-400">
-              <User size={18} />
+
+          {/* Divider */}
+          <div className="hidden sm:block w-px h-5 bg-white/10" />
+
+          {/* User chip */}
+          <div className="hidden sm:flex items-center gap-2.5 cursor-pointer group">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-neutral-700 to-neutral-800 border border-white/10 flex items-center justify-center text-neutral-400 group-hover:border-white/20 transition-colors">
+              <User size={15} />
             </div>
-            <span className="text-sm text-neutral-400 max-w-[100px] truncate">User</span>
+            <span className="text-sm text-neutral-400 group-hover:text-neutral-300 transition-colors max-w-[96px] truncate">
+              User
+            </span>
           </div>
         </div>
       </header>
 
       <FloatingDock items={dockItems} />
 
-      <main className="pt-14 min-h-screen pb-28 md:pb-32">
+      <main className="pt-20 min-h-screen pb-28 md:pb-32">
         <div className="p-4 md:p-6 max-w-[1600px] mx-auto">{children}</div>
       </main>
     </div>
