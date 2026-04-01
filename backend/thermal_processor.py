@@ -16,6 +16,19 @@ _BACKEND_DIR = Path(__file__).resolve().parent
 DLL_PATH = str(_BACKEND_DIR / "models" / "windows" / "libdirp.dll")
 
 
+def _bytes_to_c_buffer(image_bytes: bytes) -> tuple[CT.Array, c_int32]:
+    """
+    Create a binary-safe C buffer for passing JPEG bytes to the DJI SDK.
+
+    NOTE: assigning to `.value` on a ctypes string buffer treats the input as a C-string
+    and truncates at the first NUL byte, which can make different images appear identical.
+    """
+    size = c_int32(len(image_bytes))
+    buf = CT.create_string_buffer(len(image_bytes))
+    CT.memmove(buf, image_bytes, len(image_bytes))
+    return buf, size
+
+
 def dll_files_present() -> bool:
     return Path(DLL_PATH).is_file()
 
@@ -77,9 +90,7 @@ def extract_temperature_map(image_bytes: bytes, dtype: str = "float32") -> np.nd
     )
 
     handle = CT.c_void_p()
-    size = c_int32(len(image_bytes))
-    rjpeg_data = CT.create_string_buffer(len(image_bytes))
-    rjpeg_data.value = image_bytes
+    rjpeg_data, size = _bytes_to_c_buffer(image_bytes)
 
     ret = dirp_create_from_rjpeg(rjpeg_data, size, CT.byref(handle))
     if ret != DIRP_SUCCESS:
@@ -130,9 +141,7 @@ def render_thermal_image(image_bytes: bytes, palette: int = 0) -> np.ndarray:
     )
 
     handle = CT.c_void_p()
-    size = c_int32(len(image_bytes))
-    rjpeg_data = CT.create_string_buffer(len(image_bytes))
-    rjpeg_data.value = image_bytes
+    rjpeg_data, size = _bytes_to_c_buffer(image_bytes)
 
     ret = dirp_create_from_rjpeg(rjpeg_data, size, CT.byref(handle))
     if ret != DIRP_SUCCESS:

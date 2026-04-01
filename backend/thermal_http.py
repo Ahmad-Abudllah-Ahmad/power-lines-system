@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import math
@@ -194,6 +195,7 @@ async def upload_thermal_file(job_id: str, file: UploadFile, client_key: str = "
     file_id = uuid_mod.uuid4().hex[:10]
     fname = file.filename or f"thermal_{file_id}.jpg"
     img_bytes = await file.read()
+    sha256 = hashlib.sha256(img_bytes).hexdigest() if img_bytes else ""
     ck = (client_key or "").strip()[:128] or None
 
     job["files"][file_id] = {
@@ -201,6 +203,7 @@ async def upload_thermal_file(job_id: str, file: UploadFile, client_key: str = "
         "status": "pending",
         "bytes": img_bytes,
         "client_key": ck,
+        "sha256": sha256,
     }
     job["total"] = max(job["total"], len(job["files"]))
 
@@ -208,13 +211,29 @@ async def upload_thermal_file(job_id: str, file: UploadFile, client_key: str = "
         job["status"] = "active"
         asyncio.create_task(thermal_image_worker(job["job_id"]))
 
-    return {"file_id": file_id, "status": "queued", "filename": fname, "client_key": ck or ""}
+    return {"file_id": file_id, "status": "queued", "filename": fname, "client_key": ck or "", "sha256": sha256}
 
 
-async def get_thermal_results(job_id: str) -> dict:
+async def get_thermal_results(job_id: str, include_base64: bool = False) -> dict:
     job = thermal_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Thermal job not found")
+
+    results_by = job.get("results_by_file_id") or {}
+    order = job.get("result_order") or []
+    results = [results_by[fid] for fid in order if fid in results_by]
+    if not include_base64:
+        results = [{**dict(r), "thermal_image_base64_png": None} for r in results]
+
+    file_statuses: dict[str, dict] = {}
+    for fid, fdata in (job.get("files") or {}).items():
+        file_statuses[fid] = {
+            "status": fdata.get("status", ""),
+            "filename": fdata.get("filename", ""),
+            "client_key": fdata.get("client_key") or "",
+            "sha256": fdata.get("sha256") or "",
+            **({"error": fdata.get("error")} if fdata.get("error") else {}),
+        }
 
     return {
         "job_id": job_id,
@@ -224,5 +243,6 @@ async def get_thermal_results(job_id: str) -> dict:
         "palette": job.get("palette", 2),
         "unit": job.get("unit", "Celsius"),
         "object_type": job.get("object_type"),
-        "results": job["results"],
+        "results": results,
+        "file_statuses": file_statuses,
     }

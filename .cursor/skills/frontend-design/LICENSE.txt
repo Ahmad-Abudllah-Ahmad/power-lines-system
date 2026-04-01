@@ -1,0 +1,9 @@
+Frontend Design Skill — License
+
+Replace this file with the complete license terms you want to apply to this skill.
+
+Notes:
+- Cursor skills are typically shared as plain text in-repo. If this repository is public,
+  ensure your license choice is compatible with how you intend others to use it.
+- If you want a standard license, paste the full text (e.g., MIT, Apache-2.0) here.
+

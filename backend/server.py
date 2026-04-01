@@ -1527,13 +1527,29 @@ async def thermal_batch_file_route(
         "file_id": out["file_id"],
         "filename": out["filename"],
         "client_key": out.get("client_key") or "",
-    })
-    return {"file_id": out["file_id"], "status": "queued", "client_key": out.get("client_key") or ""}
+        "sha256": out.get("sha256") or "",
+    }, room=job_id)
+    return {
+        "file_id": out["file_id"],
+        "status": "queued",
+        "client_key": out.get("client_key") or "",
+        "sha256": out.get("sha256") or "",
+    }
 
 
 @app.get("/api/thermal/batch/results/{job_id}")
-async def thermal_batch_results_route(job_id: str):
-    return await _thermal_http.get_thermal_results(job_id)
+async def thermal_batch_results_route(
+    job_id: str,
+    include_base64: bool = False,
+    include_images: Optional[bool] = None,
+):
+    # Backwards compatibility: older clients used include_images=false to strip all images.
+    # New behavior: include_base64 controls only the large base64 field; URLs remain.
+    if include_images is False:
+        include_base64 = False
+    elif include_images is True:
+        include_base64 = True
+    return await _thermal_http.get_thermal_results(job_id, include_base64=include_base64)
 
 
 @app.get("/health")

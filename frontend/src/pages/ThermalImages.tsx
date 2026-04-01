@@ -43,13 +43,65 @@ type CardData = {
   status: "pending" | "uploading" | "queued" | "processing" | "complete" | "error";
   progress: number;
   progressLabel: string;
+  originalImageUrl?: string;
   thermalImageB64?: string;
   thermalImageUrl?: string;
+  sha256?: string;
   stats?: ThermalStats;
   analysis?: ThermalAnalysisData;
   unit?: string;
   error?: string;
 };
+
+function withCacheBuster(url: unknown, token: unknown): string | undefined {
+  const u = typeof url === "string" ? url.trim() : "";
+  if (!u) return undefined;
+  const t = token != null ? String(token).trim() : "";
+  if (!t) return u;
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}v=${encodeURIComponent(t)}`;
+}
+
+function resultOriginalUrl(jobId: unknown, fileId: unknown, token: unknown): string | undefined {
+  const jid = jobId != null ? String(jobId).trim() : "";
+  const fid = fileId != null ? String(fileId).trim() : "";
+  if (!jid || !fid) return undefined;
+  return withCacheBuster(
+    `/results/${encodeURIComponent(jid)}/${encodeURIComponent(fid)}_rjpeg.jpg`,
+    token || fid
+  );
+}
+
+function resultThermalUrl(jobId: unknown, fileId: unknown, token: unknown): string | undefined {
+  const jid = jobId != null ? String(jobId).trim() : "";
+  const fid = fileId != null ? String(fileId).trim() : "";
+  if (!jid || !fid) return undefined;
+  return withCacheBuster(
+    `/results/${encodeURIComponent(jid)}/${encodeURIComponent(fid)}_thermal.png`,
+    token || fid
+  );
+}
+
+// #region agent log
+function _dbgThermal(message: string, data: Record<string, unknown>, hypothesisId: string, runId: string) {
+  fetch("http://127.0.0.1:7246/ingest/594b034b-a39d-4b0f-a551-f6964a283a8d", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "6ff4e4",
+    },
+    body: JSON.stringify({
+      sessionId: "6ff4e4",
+      runId,
+      hypothesisId,
+      location: "frontend/src/pages/ThermalImages.tsx",
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+}
+// #endregion agent log
 
 type SdkHealth = {
   ok: boolean;
@@ -62,6 +114,12 @@ const uid = () => `t_${++_idCounter}_${Date.now()}`;
 
 function unitLabel(u: ThermalTempUnit) {
   return u === "Celsius" ? "°C" : u === "Fahrenheit" ? "°F" : "K";
+}
+
+function cToUnit(c: number, u: ThermalTempUnit): number {
+  if (u === "Fahrenheit") return (c * 9) / 5 + 32;
+  if (u === "Kelvin") return c + 273.15;
+  return c;
 }
 
 export default function ThermalImages({ embedded = false }: ThermalImagesProps) {
@@ -92,20 +150,38 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const jobIdRef = useRef<string | null>(null);
   const cardsRef = useRef<Map<string, CardData>>(new Map());
-  const nameToKeyRef = useRef<Map<string, string>>(new Map());
+  const fileIdToCardKeyRef = useRef<Map<string, string>>(new Map());
+  const filenameToCardKeyRef = useRef<Map<string, string>>(new Map());
+  // #region agent log
+  const dbgRunIdRef = useRef<string>(`thermal_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  // #endregion agent log
 
-  /** Prefer server echo of upload row id so results match the right card when filenames repeat. */
   const resolveThermalCardKey = (d: { client_key?: string | number; file_id?: string; filename?: string }) => {
+    const fid = (d.file_id || "").trim();
+    if (fid) {
+      const mapped = fileIdToCardKeyRef.current.get(fid);
+      if (mapped) return mapped;
+    }
     const ck = d.client_key;
     if (ck != null && String(ck).trim().length > 0) return String(ck);
-    return nameToKeyRef.current.get(d.file_id || "") || nameToKeyRef.current.get(d.filename || "");
+    return filenameToCardKeyRef.current.get((d.filename || "").trim());
+  };
+
+  const primaryCardKeyFromClientKey = (ck: unknown): string | null => {
+    const s = ck != null ? String(ck).trim() : "";
+    return s.length > 0 ? s : null;
   };
 
   const totalFiles = files.length;
   const canStart = totalFiles > 0 && !processing;
 
-  useEffect(() => { jobIdRef.current = jobId; }, [jobId]);
-  useEffect(() => { cardsRef.current = cards; }, [cards]);
+  useEffect(() => {
+    jobIdRef.current = jobId;
+  }, [jobId]);
+
+  useEffect(() => {
+    cardsRef.current = cards;
+  }, [cards]);
 
   useEffect(() => {
     fetchHealth();
@@ -119,7 +195,9 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
     try {
       const res = await fetch(`/api/thermal/health`);
       if (res.ok) setSdkHealth(await res.json());
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
 
   const updateCard = useCallback((key: string, patch: Partial<CardData>) => {
@@ -156,7 +234,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
   }, []);
 
   const clearAll = useCallback(() => {
-    setFiles((prev) => {
+    setFiles(prev => {
       prev.forEach(f => URL.revokeObjectURL(f.preview));
       return [];
     });
@@ -167,39 +245,104 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
     setPreviewId(null);
     socketRef.current?.disconnect();
     socketRef.current = null;
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    nameToKeyRef.current.clear();
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    fileIdToCardKeyRef.current.clear();
+    filenameToCardKeyRef.current.clear();
+    // #region agent log
+    _dbgThermal("clearAll", { jobId: jobIdRef.current }, "H0", dbgRunIdRef.current);
+    // #endregion agent log
   }, []);
 
   const syncFromApi = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/thermal/batch/results/${id}`);
+      const res = await fetch(`/api/thermal/batch/results/${id}?include_base64=false`);
       if (!res.ok) return;
       const body = await res.json();
+
+      // #region agent log
+      _dbgThermal(
+        "syncFromApi:received",
+        {
+          jobId: id,
+          status: body?.status,
+          completed: body?.completed,
+          total: body?.total,
+          resultsCount: Array.isArray(body?.results) ? body.results.length : null,
+          fileIdMapSize: fileIdToCardKeyRef.current.size,
+        },
+        "H1",
+        dbgRunIdRef.current
+      );
+      // #endregion agent log
 
       setCards(prev => {
         const next = new Map(prev);
         let changed = false;
+
         (body.results || []).forEach((r: any) => {
-          const cardKey = resolveThermalCardKey(r);
+          const cardKey =
+            primaryCardKeyFromClientKey(r.client_key) ||
+            fileIdToCardKeyRef.current.get((r.file_id || "").trim()) ||
+            filenameToCardKeyRef.current.get((r.filename || "").trim());
+
           if (!cardKey) return;
+
           const existing = next.get(cardKey);
-          if (existing?.status === "complete") return;
+
+          // #region agent log
+          if (existing?.fileId && r?.file_id && existing.fileId !== r.file_id) {
+            _dbgThermal(
+              "syncFromApi:mismatch_guard_drop",
+              {
+                jobId: id,
+                cardKey,
+                existingFileId: existing.fileId,
+                incomingFileId: r.file_id,
+                incomingClientKey: r.client_key,
+                incomingFilename: r.filename,
+              },
+              "H2",
+              dbgRunIdRef.current
+            );
+          }
+          // #endregion agent log
+
+          if (existing?.fileId && r.file_id && existing.fileId !== r.file_id) return;
+          if (existing?.status === "complete" && existing.fileId && existing.fileId === r.file_id) return;
+
           changed = true;
+
           next.set(cardKey, {
-            ...(existing || {} as CardData),
+            ...(existing || ({} as CardData)),
             fileId: r.file_id,
+            filename:
+              typeof r.filename === "string" && r.filename.trim()
+                ? r.filename
+                : existing?.filename || "",
             status: "complete",
             progress: 100,
             progressLabel: "Complete",
-            thermalImageB64: r.thermal_image_base64_png,
-            thermalImageUrl: r.thermal_image_url,
+            thermalImageB64: undefined,
+            originalImageUrl:
+              withCacheBuster(r.original_image_url, r.sha256) ||
+              withCacheBuster(r.thermal_rjpeg_url, r.sha256) ||
+              resultOriginalUrl(id, r.file_id, r.sha256),
+            thermalImageUrl:
+              withCacheBuster(r.thermal_visualization_url, r.sha256) ||
+              withCacheBuster(r.thermal_image_url, r.sha256) ||
+              resultThermalUrl(id, r.file_id, r.sha256),
+            sha256: r.sha256,
             stats: r.stats,
             analysis: r.analysis,
             unit: r.unit,
           });
-          nameToKeyRef.current.set(r.file_id, cardKey);
+
+          if (r.file_id) fileIdToCardKeyRef.current.set(r.file_id, cardKey);
         });
+
         return changed ? next : prev;
       });
 
@@ -209,13 +352,21 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
 
       if (body.status === "complete" || completed >= total) {
         setProcessing(false);
-        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
       }
-    } catch { /* retry next poll */ }
+    } catch {
+      /* retry next poll */
+    }
   }, []);
 
   const connectSocket = useCallback((id: string) => {
-    if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null; }
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
 
     const sock = io({ path: "/socket.io/", transports: ["websocket", "polling"] });
     socketRef.current = sock;
@@ -223,14 +374,38 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
     sock.on("connect", () => {
       sock.emit("subscribe_thermal_job", { job_id: id });
       syncFromApi(id);
+      // #region agent log
+      _dbgThermal("socket:connect_subscribe", { jobId: id }, "H1", dbgRunIdRef.current);
+      // #endregion agent log
     });
 
     sock.on("thermal_queued", (d: any) => {
       if (d.job_id !== jobIdRef.current) return;
-      const cardKey = resolveThermalCardKey(d);
+      const cardKey = primaryCardKeyFromClientKey(d.client_key) || resolveThermalCardKey(d);
       if (cardKey) {
-        nameToKeyRef.current.set(d.file_id, cardKey);
-        updateCard(cardKey, { fileId: d.file_id, status: "queued", progressLabel: "Queued" });
+        fileIdToCardKeyRef.current.set(d.file_id, cardKey);
+        updateCard(cardKey, {
+          fileId: d.file_id,
+          filename: typeof d.filename === "string" && d.filename.trim() ? d.filename : undefined,
+          status: "queued",
+          progressLabel: "Queued",
+          sha256: d.sha256,
+        });
+        // #region agent log
+        _dbgThermal(
+          "socket:thermal_queued",
+          {
+            jobId: d.job_id,
+            cardKey,
+            fileId: d.file_id,
+            clientKey: d.client_key,
+            filename: d.filename,
+            sha256: d.sha256 ? String(d.sha256).slice(0, 12) : null,
+          },
+          "H1",
+          dbgRunIdRef.current
+        );
+        // #endregion agent log
       }
     });
 
@@ -242,24 +417,64 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
 
     sock.on("thermal_result", (d: any) => {
       if (d.job_id !== jobIdRef.current) return;
-      const cardKey = resolveThermalCardKey(d);
+
+      const cardKey =
+        primaryCardKeyFromClientKey(d.client_key) ||
+        fileIdToCardKeyRef.current.get((d.file_id || "").trim()) ||
+        resolveThermalCardKey(d);
+
       if (cardKey) {
+        const existing = cardsRef.current.get(cardKey);
+
+        // #region agent log
+        _dbgThermal(
+          "socket:thermal_result",
+          {
+            jobId: d.job_id,
+            cardKey,
+            existingFileId: existing?.fileId || null,
+            incomingFileId: d.file_id,
+            clientKey: d.client_key,
+            filename: d.filename,
+            sha256: d.sha256 ? String(d.sha256).slice(0, 12) : null,
+            computedOriginalUrl: resultOriginalUrl(jobIdRef.current, d.file_id, d.sha256),
+            computedThermalUrl: resultThermalUrl(jobIdRef.current, d.file_id, d.sha256),
+            droppedByHijackGuard: Boolean(existing?.fileId && d.file_id && existing.fileId !== d.file_id),
+          },
+          "H3",
+          dbgRunIdRef.current
+        );
+        // #endregion agent log
+
+        if (existing?.fileId && d.file_id && existing.fileId !== d.file_id) return;
+
         if (d.error) {
           updateCard(cardKey, { status: "error", error: d.error });
         } else {
+          if (d.file_id) fileIdToCardKeyRef.current.set(d.file_id, cardKey);
           updateCard(cardKey, {
             fileId: d.file_id,
+            filename: typeof d.filename === "string" && d.filename.trim() ? d.filename : undefined,
             status: "complete",
             progress: 100,
             progressLabel: "Complete",
-            thermalImageB64: d.thermal_image_base64_png,
-            thermalImageUrl: d.thermal_image_url,
+            thermalImageB64: undefined,
+            originalImageUrl:
+              withCacheBuster(d.original_image_url, d.sha256) ||
+              withCacheBuster(d.thermal_rjpeg_url, d.sha256) ||
+              resultOriginalUrl(jobIdRef.current, d.file_id, d.sha256),
+            thermalImageUrl:
+              withCacheBuster(d.thermal_visualization_url, d.sha256) ||
+              withCacheBuster(d.thermal_image_url, d.sha256) ||
+              resultThermalUrl(jobIdRef.current, d.file_id, d.sha256),
+            sha256: d.sha256,
             stats: d.stats,
             analysis: d.analysis,
             unit: d.unit,
           });
         }
       }
+
       setBatchProgress({ completed: d.completed || 0, total: d.total || 0 });
     });
 
@@ -267,15 +482,20 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
       if (d.job_id !== jobIdRef.current) return;
       setBatchProgress({ completed: d.total_files, total: d.total_files });
       setProcessing(false);
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
       toast.success(`Thermal analysis complete! ${d.total_files} files processed.`, 5000);
     });
   }, [syncFromApi, updateCard]);
 
   const startAnalysis = useCallback(async () => {
     if (files.length === 0) return;
+
     setProcessing(true);
-    nameToKeyRef.current.clear();
+    fileIdToCardKeyRef.current.clear();
+    filenameToCardKeyRef.current.clear();
 
     const newCards = new Map<string, CardData>();
     files.forEach(lf => {
@@ -287,8 +507,9 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
         progress: 0,
         progressLabel: "Pending",
       });
-      nameToKeyRef.current.set(lf.file.name, lf.id);
+      filenameToCardKeyRef.current.set(lf.file.name, lf.id);
     });
+
     setCards(newCards);
     setBatchProgress({ completed: 0, total: files.length });
 
@@ -303,10 +524,12 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
           object_type: objectType || null,
         }),
       });
+
       if (!batchRes.ok) {
         const errText = await batchRes.text().catch(() => "");
         throw new Error(errText || `Server returned ${batchRes.status}`);
       }
+
       const { job_id } = await batchRes.json();
       setJobId(job_id);
       jobIdRef.current = job_id;
@@ -321,15 +544,21 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
 
       const uploadOne = async (lf: LocalFile) => {
         updateCard(lf.id, { status: "uploading", progressLabel: "Uploading..." });
+
         const formData = new FormData();
         formData.append("job_id", job_id);
         formData.append("client_key", lf.id);
         formData.append("file", lf.file, lf.file.name);
+
         try {
           const uploadRes = await fetch(`/api/thermal/batch/file`, { method: "POST", body: formData });
           if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`);
-          const up = (await uploadRes.json().catch(() => null)) as { file_id?: string } | null;
-          if (up?.file_id) nameToKeyRef.current.set(up.file_id, lf.id);
+
+          const up = (await uploadRes.json().catch(() => null)) as { file_id?: string; sha256?: string } | null;
+
+          if (up?.file_id) fileIdToCardKeyRef.current.set(up.file_id, lf.id);
+          updateCard(lf.id, { fileId: up?.file_id, sha256: up?.sha256 });
+
           setCards(prev => {
             const existing = prev.get(lf.id);
             if (existing && existing.status === "uploading") {
@@ -350,6 +579,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
           await uploadOne(lf);
         }
       });
+
       await Promise.all(workers);
 
       toast.info(`Uploaded ${files.length} files. Thermal analysis in progress...`, 3000);
@@ -359,8 +589,8 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
     }
   }, [files, palette, unit, objectType, connectSocket, syncFromApi, updateCard]);
 
-  const completedCards = useMemo(() =>
-    Array.from(cards.entries()).filter(([, c]) => c.status === "complete").map(([key]) => key),
+  const completedCards = useMemo(
+    () => Array.from(cards.entries()).filter(([, c]) => c.status === "complete").map(([key]) => key),
     [cards]
   );
 
@@ -420,7 +650,9 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
         const data = await res.json();
         setRoiStats(data.stats ?? data);
       }
-    } catch { /* ignore */ } finally {
+    } catch {
+      /* ignore */
+    } finally {
       setRoiLoading(false);
     }
   }, [roiActive, roiStart, previewCard, previewId, files, unit]);
@@ -429,7 +661,6 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
 
   return (
     <div className="space-y-6">
-      {/* Header — embedded: two cards so the left column is not stretched to the config height (removes empty band under actions). */}
       {embedded ? (
         <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
           <motion.div
@@ -442,11 +673,13 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
               <Thermometer className="text-emerald-400" size={22} />
               <div className="text-sm font-medium uppercase tracking-wider text-emerald-400">Thermal Analysis</div>
               {sdkHealth && (
-                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                  sdkHealth.sdk_initialized
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                    : "border-red-500/30 bg-red-500/10 text-red-400"
-                }`}>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                    sdkHealth.sdk_initialized
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                      : "border-red-500/30 bg-red-500/10 text-red-400"
+                  }`}
+                >
                   {sdkHealth.sdk_initialized ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
                   DJI SDK {sdkHealth.sdk_initialized ? "Ready" : "Offline"}
                 </span>
@@ -520,11 +753,13 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                 <Thermometer className="text-emerald-400" size={22} />
                 <div className="text-sm font-medium uppercase tracking-wider text-emerald-400">Thermal Analysis</div>
                 {sdkHealth && (
-                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                    sdkHealth.sdk_initialized
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                      : "border-red-500/30 bg-red-500/10 text-red-400"
-                  }`}>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                      sdkHealth.sdk_initialized
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                        : "border-red-500/30 bg-red-500/10 text-red-400"
+                    }`}
+                  >
                     {sdkHealth.sdk_initialized ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
                     DJI SDK {sdkHealth.sdk_initialized ? "Ready" : "Offline"}
                   </span>
@@ -580,16 +815,16 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
         </motion.div>
       )}
 
-      {/* Upload */}
       <div className="grid grid-cols-1 gap-6">
         <motion.div
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ ...transition, delay: reduceMotion ? 0 : 0.05 }}
           className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium"
         >
-          <div className="flex items-center gap-2 mb-4">
+          <div className="mb-4 flex items-center gap-2">
             <Upload className="text-emerald-400" size={20} />
-            <h2 className="font-semibold text-white text-lg">Image Upload</h2>
+            <h2 className="text-lg font-semibold text-white">Image Upload</h2>
           </div>
 
           <MediaUploadBox
@@ -597,9 +832,20 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
             dragActive={dragActive}
             disabled={processing}
             hasFiles={files.length > 0}
-            onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
-            onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
-            onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+            onDragEnter={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragActive(true);
+            }}
+            onDragLeave={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragActive(false);
+            }}
+            onDragOver={e => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
             onDrop={e => {
               e.preventDefault();
               e.stopPropagation();
@@ -618,7 +864,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
               if (e.target.files?.length) addFiles(Array.from(e.target.files));
               e.target.value = "";
             }}
-            emptyIcon={<Thermometer className="text-3xl text-neutral-500 mx-auto" size={36} />}
+            emptyIcon={<Thermometer className="mx-auto text-3xl text-neutral-500" size={36} />}
             emptyDescription="Drop thermal images here or click to browse"
             primaryButtonLabel="Select Thermal Images"
             footerNote="DJI R-JPEG radiometric thermal images for temperature analysis"
@@ -627,15 +873,19 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
               <CheckCircle2 size={16} />
               <span>{files.length} thermal image(s) selected</span>
             </div>
-            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+            <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
               {files.map(f => (
-                <div key={f.id} className="relative group">
-                  <img src={f.preview} alt={f.file.name} className="w-16 h-16 object-cover rounded-lg border border-neutral-700" />
+                <div key={f.id} className="group relative">
+                  <img
+                    src={f.preview}
+                    alt={f.file.name}
+                    className="h-16 w-16 rounded-lg border border-neutral-700 object-cover"
+                  />
                   {!processing && (
                     <button
                       type="button"
                       onClick={() => removeFile(f.id)}
-                      className="absolute -top-1 -right-1 bg-red-500 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute -right-1 -top-1 rounded-full bg-red-500 p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
                     >
                       <X size={10} className="text-white" />
                     </button>
@@ -646,9 +896,11 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
           </MediaUploadBox>
 
           {totalFiles > 0 && !processing && (
-            <div className="mt-3 rounded-xl bg-premium-card/50 border border-neutral-700 p-3">
+            <div className="mt-3 rounded-xl border border-neutral-700 bg-premium-card/50 p-3">
               <div className="flex items-center justify-between">
-                <div className="text-sm text-white font-medium">{totalFiles} file{totalFiles !== 1 ? "s" : ""} ready</div>
+                <div className="text-sm font-medium text-white">
+                  {totalFiles} file{totalFiles !== 1 ? "s" : ""} ready
+                </div>
                 <span className="text-xs text-emerald-400">{totalFiles} Thermal</span>
               </div>
             </div>
@@ -656,36 +908,41 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
         </motion.div>
       </div>
 
-      {/* Progress */}
       {processing && (
         <div className="glass rounded-2xl border border-emerald-500/50 bg-emerald-500/10 p-4 shadow-premium">
-          <div className="flex items-center justify-between mb-2">
+          <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Clock className="text-emerald-400 animate-spin" size={18} />
+              <Clock className="animate-spin text-emerald-400" size={18} />
               <span className="font-semibold text-white">Processing Thermal Images</span>
             </div>
             <span className="text-sm text-neutral-300">
-              {batchProgress.total > 0 ? `${Math.round((batchProgress.completed / batchProgress.total) * 100)}%` : "—"}
+              {batchProgress.total > 0
+                ? `${Math.round((batchProgress.completed / batchProgress.total) * 100)}%`
+                : "—"}
             </span>
           </div>
-          <div className="w-full bg-neutral-800 rounded-full h-2.5 overflow-hidden">
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-neutral-800">
             {batchProgress.total > 0 ? (
-              <div className="bg-gradient-to-r from-emerald-500 to-teal-500 h-full transition-all duration-300 rounded-full" style={{ width: `${(batchProgress.completed / batchProgress.total) * 100}%` }} />
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-300"
+                style={{ width: `${(batchProgress.completed / batchProgress.total) * 100}%` }}
+              />
             ) : (
-              <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-gradient-to-r from-transparent via-emerald-500/70 to-transparent" />
+              <div className="animate-progress-indeterminate h-full w-1/3 rounded-full bg-gradient-to-r from-transparent via-emerald-500/70 to-transparent" />
             )}
           </div>
           <div className="mt-2 text-xs text-neutral-400">
-            {batchProgress.total > 0 ? `${batchProgress.completed} of ${batchProgress.total} files completed` : "Uploading files..."}
+            {batchProgress.total > 0
+              ? `${batchProgress.completed} of ${batchProgress.total} files completed`
+              : "Uploading files..."}
           </div>
         </div>
       )}
 
-      {/* Results Grid */}
       {cards.size > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
               <Layers className="text-emerald-400" size={20} />
               Analysis Results ({cards.size})
             </h2>
@@ -693,7 +950,10 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
               {(() => {
                 const completed = Array.from(cards.values()).filter(c => c.status === "complete").length;
                 const errors = Array.from(cards.values()).filter(c => c.status === "error").length;
-                const active = Array.from(cards.values()).filter(c => ["processing", "queued", "uploading"].includes(c.status)).length;
+                const active = Array.from(cards.values()).filter(c =>
+                  ["processing", "queued", "uploading"].includes(c.status)
+                ).length;
+
                 return (
                   <>
                     {completed > 0 && <span className="text-emerald-400">&#x2713; {completed} complete</span>}
@@ -704,14 +964,15 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
               })()}
             </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {Array.from(cards.entries()).map(([key, card]) => (
               <div
                 key={key}
                 onClick={() => card.status === "complete" && setPreviewId(key)}
-                className={`rounded-xl border overflow-hidden transition-all group ${
+                className={`group overflow-hidden rounded-xl border transition-all ${
                   card.status === "complete"
-                    ? "border-emerald-500/30 bg-emerald-500/5 cursor-pointer hover:shadow-glow hover:border-emerald-400/50"
+                    ? "cursor-pointer border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-400/50 hover:shadow-glow"
                     : card.status === "error"
                     ? "border-red-500/30 bg-red-500/5"
                     : card.status === "processing"
@@ -719,44 +980,127 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                     : "border-neutral-800 bg-premium-card/30"
                 }`}
               >
-                <div className="relative aspect-square bg-neutral-800 overflow-hidden">
+                <div className="relative aspect-square overflow-hidden bg-neutral-800">
                   {card.status === "complete" && card.thermalImageB64 ? (
-                    <img src={`data:image/png;base64,${card.thermalImageB64}`} alt={card.filename} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" loading="lazy" />
-                  ) : card.status === "complete" && card.thermalImageUrl ? (
-                    <img src={card.thermalImageUrl} alt={card.filename} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" loading="lazy" />
+                    <img
+                      src={`data:image/png;base64,${card.thermalImageB64}`}
+                      alt={card.filename}
+                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  ) : card.status === "complete" && card.originalImageUrl ? (
+                    <img
+                      key={card.fileId || card.sha256 || card.originalImageUrl}
+                      src={card.originalImageUrl}
+                      alt={card.filename}
+                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                      loading="lazy"
+                      onLoad={e => {
+                        const el = e.currentTarget;
+                        _dbgThermal(
+                          "ui:img_loaded",
+                          {
+                            cardKey: key,
+                            fileId: card.fileId || null,
+                            filename: card.filename || null,
+                            sha256: card.sha256 ? card.sha256.slice(0, 12) : null,
+                            src: card.originalImageUrl || null,
+                            currentSrc: (el as any).currentSrc || null,
+                            naturalW: el.naturalWidth,
+                            naturalH: el.naturalHeight,
+                          },
+                          "H4",
+                          dbgRunIdRef.current
+                        );
+                      }}
+                      onError={() => {
+                        if (import.meta.env.DEV) {
+                          console.warn("[thermal] image load failed", {
+                            filename: card.filename,
+                            fileId: card.fileId,
+                            sha256: card.sha256,
+                            url: card.originalImageUrl,
+                          });
+                        }
+                        _dbgThermal(
+                          "ui:img_error",
+                          {
+                            cardKey: key,
+                            fileId: card.fileId || null,
+                            sha256: card.sha256 ? card.sha256.slice(0, 12) : null,
+                            src: card.originalImageUrl || null,
+                          },
+                          "H4",
+                          dbgRunIdRef.current
+                        );
+                      }}
+                    />
                   ) : card.localPreview ? (
-                    <img src={card.localPreview} alt={card.filename} className="w-full h-full object-cover opacity-50" loading="lazy" />
+                    <img
+                      src={card.localPreview}
+                      alt={card.filename}
+                      className="h-full w-full object-cover opacity-50"
+                      loading="lazy"
+                    />
                   ) : (
-                    <div className="absolute inset-0 flex items-center justify-center"><FileImage className="text-neutral-600" size={32} /></div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <FileImage className="text-neutral-600" size={32} />
+                    </div>
                   )}
 
                   {card.status !== "complete" && card.status !== "error" && (
-                    <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-2">
-                      {card.status === "processing" ? <Clock className="text-emerald-400 animate-spin" size={24} /> : <Clock className="text-neutral-400" size={24} />}
-                      <span className="text-[10px] text-white font-medium px-2 text-center">{card.progressLabel}</span>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40">
+                      {card.status === "processing" ? (
+                        <Clock className="animate-spin text-emerald-400" size={24} />
+                      ) : (
+                        <Clock className="text-neutral-400" size={24} />
+                      )}
+                      <span className="px-2 text-center text-[10px] font-medium text-white">
+                        {card.progressLabel}
+                      </span>
                     </div>
                   )}
 
                   {card.status === "error" && (
-                    <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-1 px-2">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/50 px-2">
                       <XCircle className="text-red-400" size={24} />
-                      <span className="text-[10px] text-red-300 text-center">{card.error || "Error"}</span>
+                      <span className="text-center text-[10px] text-red-300">{card.error || "Error"}</span>
                     </div>
                   )}
 
-                  <div className="absolute top-1 left-1">
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/80 text-white">THERMAL</span>
+                  <div className="absolute left-1 top-1">
+                    <span className="rounded bg-emerald-500/80 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                      THERMAL
+                    </span>
                   </div>
 
                   {card.status === "complete" && (
-                    <div className="absolute bottom-1 right-1"><CheckCircle2 className="text-emerald-400 drop-shadow-lg" size={16} /></div>
+                    <div className="absolute bottom-1 right-1">
+                      <CheckCircle2 className="drop-shadow-lg text-emerald-400" size={16} />
+                    </div>
                   )}
                 </div>
+
                 <div className="p-2">
-                  <p className="text-[11px] truncate font-medium text-white" title={card.filename}>{card.filename}</p>
+                  <p className="truncate text-[11px] font-medium text-white" title={card.filename}>
+                    {card.filename}
+                  </p>
+
                   {card.status === "complete" && card.stats && (
                     <div className="mt-1 text-[10px] text-neutral-400">
-                      {card.stats.min_c != null ? card.stats.min_c.toFixed(1) : "—"}–{card.stats.max_c != null ? card.stats.max_c.toFixed(1) : "—"} {u}
+                      {(() => {
+                        const displayUnit = (card.unit as ThermalTempUnit) || unit;
+                        const uu = unitLabel(displayUnit);
+                        const min =
+                          card.stats?.min_c != null
+                            ? cToUnit(card.stats.min_c, displayUnit).toFixed(1)
+                            : "—";
+                        const max =
+                          card.stats?.max_c != null
+                            ? cToUnit(card.stats.max_c, displayUnit).toFixed(1)
+                            : "—";
+                        return `${min}–${max} ${uu}`;
+                      })()}
                     </div>
                   )}
                 </div>
@@ -776,8 +1120,8 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
           setRoiStats(null);
         }}
         filename={previewCard?.filename ?? ""}
-        thermalImageB64={previewCard?.thermalImageB64}
-        thermalImageUrl={previewCard?.thermalImageUrl}
+        thermalImageB64={undefined}
+        thermalImageUrl={previewCard?.originalImageUrl}
         stats={previewCard?.stats}
         analysis={previewCard?.analysis}
         unit={previewCard?.unit ?? unit}
@@ -788,7 +1132,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
         exporting={exporting === previewId}
         roiActive={roiActive}
         onToggleRoi={() => {
-          setRoiActive((a) => !a);
+          setRoiActive(a => !a);
           setRoiStart(null);
           setRoiEnd(null);
           setRoiStats(null);
