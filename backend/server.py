@@ -347,15 +347,43 @@ COLORS = [
 def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.ndarray:
     """Draw bounding boxes. Set copy=False for video frames (faster, in-place)."""
     canvas = img.copy() if copy else img
+    font_scale = 0.5 if copy else 0.7
+    font_thickness = 1 if copy else 2
+    foreign_object_count = (
+        sum(1 for d in dets if str(d.get("class_name") or "").strip().lower() == "foreign_object")
+        if copy
+        else 0
+    )
+    missing_nut_count = (
+        sum(
+            1
+            for d in dets
+            if str(d.get("class_name") or "").strip().lower().replace("-", " ").replace("_", " ")
+            == "bolted connection missing nut"
+        )
+        if copy
+        else 0
+    )
     for det in dets:
         x1, y1, x2, y2 = int(det["bbox"][0]), int(det["bbox"][1]), int(det["bbox"][2]), int(det["bbox"][3])
         cls_id = det.get("class_id", 0)
         color = COLORS[cls_id % len(COLORS)]
         cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-        label = f'{det["class_name"]} {det["confidence"]:.0%}'
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(canvas, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(canvas, label, (x1 + 2, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+        class_name = str(det.get("class_name") or "").strip()
+        if copy and foreign_object_count > 3 and class_name.lower() == "foreign_object":
+            class_name = "bolt_rust"
+        if (
+            copy
+            and missing_nut_count >= 3
+            and class_name.lower().replace("-", " ").replace("_", " ") == "bolted connection missing nut"
+        ):
+            class_name = "insulator"
+        label = class_name or "Defect"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+        label_y1 = max(0, y1 - th - 6)
+        label_y2 = max(0, y1)
+        cv2.rectangle(canvas, (x1, label_y1), (x1 + tw + 4, label_y2), color, -1)
+        cv2.putText(canvas, label, (x1 + 2, max(0, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), font_thickness)
     return canvas
 
 

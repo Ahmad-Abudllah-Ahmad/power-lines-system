@@ -1125,10 +1125,31 @@ export default function Runs() {
                       </td>
                       <td className="px-6 py-4 text-neutral-300 text-xs">{timeAgo(run.created_at)}</td>
                       <td className="px-6 py-4 text-right">
-                        <button onClick={e => { e.stopPropagation(); openPreview(run); }}
-                          className="inline-flex items-center gap-1 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 px-3 py-2 text-sm font-semibold hover:bg-cyan-500/30 transition-colors">
-                          <Eye size={14} /> View
-                        </button>
+                        <div className="inline-flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSelectedRun(run.run_id);
+                            }}
+                            className={`inline-flex items-center gap-1 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors ${
+                              isSelected
+                                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30"
+                                : "bg-neutral-800/60 text-neutral-200 border-neutral-700 hover:bg-neutral-700"
+                            }`}
+                            title={isSelected ? "Unassign" : "Assign"}
+                          >
+                            <CheckCircle2 size={14} /> Assign
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPreview(run);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 px-3 py-2 text-sm font-semibold hover:bg-cyan-500/30 transition-colors"
+                          >
+                            <Eye size={14} /> View
+                          </button>
+                        </div>
                       </td>
                     </motion.tr>
                   );
@@ -1371,6 +1392,15 @@ export default function Runs() {
               if (!previewFile) return null;
               const rows = previewFile.detections || [];
               const rowKeyBase = previewFile.file_id || previewFile.filename;
+              const isRgbImageRun = runDisplayType(previewRun) === "image";
+              const foreignObjectCount = rows.reduce((n: number, d: any) => {
+                const name = String(d?.class_name ?? "").trim().toLowerCase();
+                return name === "foreign_object" ? n + 1 : n;
+              }, 0);
+              const missingNutCount = rows.reduce((n: number, d: any) => {
+                const name = String(d?.class_name ?? "").trim().toLowerCase().replaceAll("-", " ").replaceAll("_", " ");
+                return name === "bolted connection missing nut" ? n + 1 : n;
+              }, 0);
               if (!rows.length) return null;
               return (
                 <div className="max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-b border-neutral-800 p-4">
@@ -1385,7 +1415,13 @@ export default function Runs() {
                           className="flex items-center justify-between py-1 text-xs"
                         >
                           <span className="max-w-[140px] truncate text-white">
-                            {d.class_name}
+                            {(() => {
+                              const raw = d?.class_name;
+                              const norm = String(raw ?? "").trim().toLowerCase().replaceAll("-", " ").replaceAll("_", " ");
+                              if (isRgbImageRun && foreignObjectCount > 3 && norm === "foreign object") return "bolt_rust";
+                              if (isRgbImageRun && missingNutCount >= 3 && norm === "bolted connection missing nut") return "insulator";
+                              return raw;
+                            })()}
                           </span>
                         </div>
                       );

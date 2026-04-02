@@ -105,10 +105,8 @@ export default function ImageAnnotator({ src, findings, assumedSize }: Props) {
       ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
       ctx.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2);
       
-      // Prepare label text
-      const confidence = f.confidence ? `${(f.confidence * 100).toFixed(0)}%` : "";
-      const formattedLabel = formatDetectionLabel(f.label);
-      const label = `${formattedLabel}${confidence ? ` • ${confidence}` : ""} • ${f.severity}`;
+      // Prepare label text (label only; no percentages)
+      const label = formatDetectionLabel(f.label);
       
       // Calculate label dimensions
       ctx.font = "bold 12px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";

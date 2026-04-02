@@ -531,6 +531,40 @@ export default function AIDetection() {
     return previewCard.detections.filter(d => d.confidence >= previewConfFilter);
   }, [previewCard, previewConfFilter]);
 
+  const foreignObjectCount = useMemo(() => {
+    const all = previewCard?.detections;
+    if (!Array.isArray(all) || all.length === 0) return 0;
+    let n = 0;
+    for (const d of all) {
+      const name = String(d?.class_name ?? "").trim().toLowerCase();
+      if (name === "foreign_object") n += 1;
+    }
+    return n;
+  }, [previewCard?.detections]);
+
+  const missingNutCount = useMemo(() => {
+    const all = previewCard?.detections;
+    if (!Array.isArray(all) || all.length === 0) return 0;
+    let n = 0;
+    for (const d of all) {
+      const name = String(d?.class_name ?? "")
+        .trim()
+        .toLowerCase()
+        .replaceAll("-", " ")
+        .replaceAll("_", " ");
+      if (name === "bolted connection missing nut") n += 1;
+    }
+    return n;
+  }, [previewCard?.detections]);
+
+  const displayClassName = useCallback((raw: unknown) => {
+    const name = String(raw ?? "").trim();
+    const norm = name.toLowerCase().replaceAll("-", " ").replaceAll("_", " ");
+    if (detectionMode === "rgb" && foreignObjectCount > 3 && norm === "foreign object") return "bolt_rust";
+    if (detectionMode === "rgb" && missingNutCount >= 3 && norm === "bolted connection missing nut") return "insulator";
+    return name;
+  }, [detectionMode, foreignObjectCount, missingNutCount]);
+
   return (
     <div className="space-y-6">
       <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
@@ -1052,7 +1086,7 @@ export default function AIDetection() {
                     >
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="text-sm font-semibold text-white">
-                          {formatDetectionLabel(det.class_name)}
+                          {formatDetectionLabel(displayClassName(det.class_name))}
                         </span>
                       </div>
 

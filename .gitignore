@@ -56,3 +56,4 @@ backend/models/**/*.pt
 backend/models/**/*.pth
 backend/models/**/*.onnx
 baackend/models/windows/
+backend/models/
