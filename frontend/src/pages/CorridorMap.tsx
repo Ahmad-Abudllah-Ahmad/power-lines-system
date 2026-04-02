@@ -77,16 +77,40 @@ function isVideoStyleRun(run: Run | undefined): boolean {
   return Boolean(anyRun.files?.some((f) => isMp4Url(f.video_url ?? undefined)));
 }
 
-/** Same rules as Dashboard `extractUrlsFromRunPayload` (RGB / annotated thumbs from list payload). */
+function isDjiThermalAnalysisRun(run: Run): boolean {
+  return Boolean((run as unknown as { thermal_analysis_job?: boolean }).thermal_analysis_job);
+}
+
+/** Pick thermal preview URL from batch result row (same field order as Dashboard / Runs thermal preview). */
+function thermalResultRowToMediaUrl(r: Record<string, unknown>): string {
+  const pick = (k: string) => {
+    const v = r[k];
+    return typeof v === "string" ? v.trim() : "";
+  };
+  const raw =
+    pick("original_image_url") ||
+    pick("thermal_rjpeg_url") ||
+    pick("thermal_image_url") ||
+    pick("thermal_visualization_url") ||
+    "";
+  return raw ? mediaUrl(raw) : "";
+}
+
+/** Same rules as Dashboard `extractUrlsFromRunPayload` (RGB / annotated thumbs; thermal files use radiometric / viz paths). */
 function extractUrlsFromRunPayload(run: Run): { urls: string[] } {
   const anyRun = run as unknown as {
     type?: string;
     files?: Array<{
       filename?: string;
       file_id?: string;
+      source?: string;
       thumb_url?: string | null;
       annotated_url?: string | null;
       video_url?: string | null;
+      original_image_url?: string | null;
+      thermal_rjpeg_url?: string | null;
+      thermal_image_url?: string | null;
+      thermal_visualization_url?: string | null;
     }>;
   };
   const files = anyRun.files;
@@ -98,6 +122,11 @@ function extractUrlsFromRunPayload(run: Run): { urls: string[] } {
     const fileIsVideo = runIsVideo || isMp4Url(f.video_url ?? undefined);
     let u = f.annotated_url || f.thumb_url || null;
     if (!u && f.video_url && !isMp4Url(f.video_url)) u = f.video_url;
+    if (!u && f.source === "thermal" && jobId && f.file_id) {
+      const embedded =
+        (f.original_image_url || f.thermal_rjpeg_url || f.thermal_image_url || f.thermal_visualization_url || "").trim();
+      u = embedded || `/results/${jobId}/${f.file_id}_thermal.png`;
+    }
     if (!u && f.file_id) {
       if (fileIsVideo) u = `/results/${f.file_id}/thumb.jpg`;
       else if (jobId) u = `/results/${jobId}/${f.file_id}_annotated.jpg`;
@@ -122,12 +151,25 @@ function filterRgbCarouselUrls(run: Run, urls: string[]): string[] {
 }
 
 function filesPayloadSignature(run: Run): string {
+  const thermal = isDjiThermalAnalysisRun(run) ? "1" : "0";
   const anyRun = run as unknown as {
-    files?: Array<{ thumb_url?: string | null; annotated_url?: string | null; source?: string }>;
+    files?: Array<{
+      thumb_url?: string | null;
+      annotated_url?: string | null;
+      source?: string;
+      original_image_url?: string | null;
+      thermal_rjpeg_url?: string | null;
+    }>;
   };
   const files = anyRun.files;
-  if (!files?.length) return "";
-  return files.map((f) => `${f.thumb_url ?? ""}|${f.annotated_url ?? ""}|${f.source ?? ""}`).join(";");
+  if (!files?.length) return thermal;
+  const fileSig = files
+    .map(
+      (f) =>
+        `${f.thumb_url ?? ""}|${f.annotated_url ?? ""}|${f.source ?? ""}|${f.original_image_url ?? ""}|${f.thermal_rjpeg_url ?? ""}`
+    )
+    .join(";");
+  return `${thermal};${fileSig}`;
 }
 
 function formatBatchUploadDate(run: Run): string {
@@ -168,20 +210,20 @@ function HoverThumbSlider({
   }, [slideUrls.length]);
   if (loading && slideUrls.length === 0) {
     return (
-      <div className="absolute inset-0 bg-neutral-800 flex items-center justify-center">
-        <Clock className="text-neutral-500 w-6 h-6 animate-spin" />
+      <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
+        <Clock className="dash-text-subtle w-6 h-6 animate-spin" />
       </div>
     );
   }
   if (slideUrls.length === 0) {
     return (
-      <div className="absolute inset-0 bg-neutral-800 flex items-center justify-center">
+      <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
         <ImageIcon className="w-7 h-7 text-neutral-600" />
       </div>
     );
   }
   return (
-    <div className="absolute inset-0 bg-neutral-900 overflow-hidden">
+    <div className="absolute inset-0 overflow-hidden" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
       {slideUrls.map((u, i) => (
         <img
           key={`${runId}-${u}-${i}`}
@@ -195,7 +237,7 @@ function HoverThumbSlider({
         />
       ))}
       {slideUrls.length > 1 && (
-        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-[2] rounded-full bg-black/65 px-1.5 py-0.5 text-[9px] text-neutral-200 font-mono tabular-nums">
+        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-[2] rounded-full bg-black/65 px-1.5 py-0.5 text-[9px] dash-text-body font-Poppins tabular-nums">
           {idx + 1}/{slideUrls.length}
         </div>
       )}
@@ -205,10 +247,44 @@ function HoverThumbSlider({
 
 function MapBatchHoverPanel({ run, runId }: { run: Run; runId: string }) {
   const sig = filesPayloadSignature(run);
+  const thermalAnalysisJob = isDjiThermalAnalysisRun(run);
   const [urls, setUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (thermalAnalysisJob) {
+      let cancelled = false;
+      setLoading(true);
+      setUrls([]);
+      (async () => {
+        let next: string[] = [];
+        try {
+          const res = await fetch(`/api/thermal/batch/results/${encodeURIComponent(runId)}`);
+          if (res.ok) {
+            const data = await res.json();
+            const results = Array.isArray(data?.results) ? data.results : [];
+            next = results
+              .map((row: Record<string, unknown>) => thermalResultRowToMediaUrl(row))
+              .filter(Boolean);
+          }
+        } catch {
+          /* ignore */
+        }
+        if (!cancelled) {
+          let out = next.slice(0, MAP_HOVER_CAROUSEL_MAX);
+          if (out.length === 0) {
+            const e = extractUrlsFromRunPayload(run);
+            out = filterRgbCarouselUrls(run, e.urls).slice(0, MAP_HOVER_CAROUSEL_MAX);
+          }
+          setUrls(out);
+          setLoading(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const e = extractUrlsFromRunPayload(run);
     const filtered = filterRgbCarouselUrls(run, e.urls).slice(0, MAP_HOVER_CAROUSEL_MAX);
     if (filtered.length > 0) {
@@ -227,10 +303,11 @@ function MapBatchHoverPanel({ run, runId }: { run: Run; runId: string }) {
         } else {
           const detail = await getRun(runId);
           const art = detail.artifacts;
-          const u =
-            art
-              ? resolveArtifactUrl(art, runId, "overlay") || resolveArtifactUrl(art, runId, "annotated")
-              : undefined;
+          const u = art
+            ? resolveArtifactUrl(art, runId, "overlay") ||
+              resolveArtifactUrl(art, runId, "annotated") ||
+              resolveArtifactUrl(art, runId, "thermal")
+            : undefined;
           if (u) next = [mediaUrl(u)];
         }
       } catch {
@@ -244,17 +321,17 @@ function MapBatchHoverPanel({ run, runId }: { run: Run; runId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [runId, sig]);
+  }, [runId, sig, thermalAnalysisJob]);
 
   return (
-    <div className="w-[220px] overflow-hidden rounded-lg border border-neutral-600 bg-[#0f1419] text-left shadow-xl">
-      <div className="border-b border-neutral-700 px-2.5 py-2">
-        <div className="text-xs font-semibold text-white truncate" title={runId}>
+    <div className="w-[220px] overflow-hidden rounded-lg border border-neutral-600 text-left shadow-xl" style={{ backgroundColor: "var(--dash-modal-aside)" }}>
+      <div className="border-b border-[var(--dash-panel-border)] px-2.5 py-2">
+        <div className="text-xs font-semibold dash-text-primary truncate" title={runId}>
           Batch {runId}
         </div>
-        <div className="text-[11px] text-neutral-400 mt-0.5">Uploaded {formatBatchUploadDate(run)}</div>
+        <div className="text-[11px] dash-text-muted mt-0.5">Uploaded {formatBatchUploadDate(run)}</div>
       </div>
-      <div className="relative aspect-video w-full bg-neutral-950">
+      <div className="relative aspect-video w-full" style={{ backgroundColor: "var(--dash-media-bg)" }}>
         <HoverThumbSlider runId={runId} urls={urls} loading={loading} />
       </div>
     </div>
@@ -436,8 +513,8 @@ export default function CorridorMap() {
   if (loading) {
     return (
       <div className="h-[calc(100vh-3.5rem)] flex">
-        <div className="flex-1 bg-neutral-900 animate-pulse" />
-        <div className="w-80 border-l border-neutral-800 bg-[#0f1419] p-4 space-y-4">
+        <div className="flex-1 animate-pulse" style={{ backgroundColor: "var(--dash-nested-bg)" }} />
+        <div className="w-80 border-l border-[var(--dash-panel-border)] p-4 space-y-4" style={{ backgroundColor: "var(--dash-modal-aside)" }}>
           <div className="h-6 w-32 bg-neutral-700/50 rounded animate-pulse" />
           <div className="h-10 w-full bg-neutral-700/40 rounded animate-pulse" />
           <div className="h-16 w-full bg-neutral-700/40 rounded animate-pulse" />
@@ -454,7 +531,7 @@ export default function CorridorMap() {
           center={runsWithGps.length ? [runsWithGps[0]._gps.lat, runsWithGps[0]._gps.lng] : AZERBAIJAN_CENTER}
           zoom={runsWithGps.length ? 8 : DEFAULT_ZOOM}
           className="h-full w-full"
-          style={{ background: "#1a2332" }}
+          style={{ backgroundColor: "var(--dash-modal-aside)" }}
         >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -485,14 +562,14 @@ export default function CorridorMap() {
                 <MapBatchHoverPanel run={run} runId={run._runId} />
               </Tooltip>
               <Popup>
-                <div className="text-sm text-neutral-800 min-w-[160px]">
+                <div className="text-sm dash-text-primary min-w-[160px]">
                   <div className="font-semibold truncate" title={run._runId}>
                     Batch {run._runId}
                   </div>
-                  <div className="text-xs text-neutral-500 mt-1">
+                  <div className="text-xs dash-text-subtle mt-1">
                     {run.status} &bull; {(run.created_at ?? run.timestamp) ? new Date(run.created_at ?? run.timestamp).toLocaleDateString() : "—"}
                   </div>
-                  <div className="text-xs text-neutral-500 mt-1">
+                  <div className="text-xs dash-text-subtle mt-1">
                     Findings: {run.total_defects ?? run.findings_count ?? 0} &bull; Files: {run.completed ?? 0}/{run.total_files ?? 0}
                   </div>
                   <Link
@@ -515,17 +592,18 @@ export default function CorridorMap() {
             animate={{ width: 320, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={transition}
-            className="flex flex-col w-80 border-l border-neutral-800 bg-[#0f1419] overflow-hidden shrink-0 fixed right-0 top-14 bottom-0 z-50 sm:relative sm:top-0 sm:z-auto"
+            className="flex flex-col w-80 border-l border-[var(--dash-panel-border)] overflow-hidden shrink-0 fixed right-0 top-14 bottom-0 z-50 sm:relative sm:top-0 sm:z-auto"
+            style={{ backgroundColor: "var(--dash-modal-aside)" }}
           >
-            <div className="p-4 border-b border-neutral-800 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <div className="p-4 border-b border-[var(--dash-panel-border)] flex items-center justify-between">
+              <h2 className="text-sm font-semibold dash-text-primary flex items-center gap-2">
                 <Layers size={18} className="text-cyan-400" />
                 Corridor Map
               </h2>
               <button
                 type="button"
                 onClick={() => setPanelOpen(false)}
-                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                className="p-1.5 rounded-lg dash-text-muted hover:dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
                 aria-label="Collapse panel"
               >
                 <ChevronRight size={18} />
@@ -536,11 +614,12 @@ export default function CorridorMap() {
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 text-center"
+                  className="rounded-xl border border-[var(--dash-panel-border)] p-6 text-center"
+                  style={{ backgroundColor: "var(--dash-nested-bg)" }}
                 >
-                  <Map className="mx-auto text-neutral-500 mb-3" size={40} />
-                  <p className="text-sm text-neutral-400 mb-2">No batches to map yet.</p>
-                  <p className="text-xs text-neutral-500 mb-4">
+                  <Map className="mx-auto dash-text-subtle mb-3" size={40} />
+                  <p className="text-sm dash-text-muted mb-2">No batches to map yet.</p>
+                  <p className="text-xs dash-text-subtle mb-4">
                     Each upload gets a pin inside Azerbaijan. Process files from AI Detection or Video Upload.
                   </p>
                   <Link
@@ -554,14 +633,15 @@ export default function CorridorMap() {
               ) : (
                 <>
                   <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                    <div className="flex items-center gap-2 text-xs font-medium dash-text-muted uppercase tracking-wider">
                       <Filter size={14} />
                       Filters
                     </div>
                     <select
                       value={statusFilter}
                       onChange={(e) => setStatusFilter(e.target.value)}
-                      className="w-full rounded-lg bg-neutral-800 border border-neutral-700 text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+                      className="w-full rounded-lg border border-[var(--dash-panel-border)] dash-text-primary px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+                      style={{ backgroundColor: "var(--dash-inset-bg)" }}
                     >
                       <option value="all">All status</option>
                       <option value="completed">Completed</option>
@@ -569,12 +649,12 @@ export default function CorridorMap() {
                       <option value="failed">Failed</option>
                       <option value="pending">Pending</option>
                     </select>
-                    <label className="flex items-center gap-2 cursor-pointer text-sm text-neutral-300">
+                    <label className="flex items-center gap-2 cursor-pointer text-sm dash-text-body">
                       <input
                         type="checkbox"
                         checked={needsReviewOnly}
                         onChange={(e) => setNeedsReviewOnly(e.target.checked)}
-                        className="rounded border-neutral-600 bg-neutral-800 text-cyan-500 focus:ring-cyan-500/50"
+                        className="rounded border-neutral-600 bg-[var(--dash-inset-bg)] text-cyan-500 focus:ring-cyan-500/50"
                       />
                       Needs review only
                     </label>
@@ -587,7 +667,7 @@ export default function CorridorMap() {
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                             dateRange === d
                               ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/50"
-                              : "bg-neutral-800 text-neutral-400 border border-neutral-700 hover:bg-neutral-700"
+                              : "bg-[var(--dash-inset-bg)] dash-text-muted border border-[var(--dash-panel-border)] hover:bg-[var(--dash-hover-bg)]"
                           }`}
                         >
                           {d === "all" ? "All" : `${d}d`}
@@ -595,13 +675,14 @@ export default function CorridorMap() {
                       ))}
                     </div>
                     <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" size={16} />
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 dash-text-subtle" size={16} />
                       <input
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search run ID / tower ID..."
-                        className="w-full rounded-lg bg-neutral-800 border border-neutral-700 text-white pl-9 pr-3 py-2 text-sm placeholder-neutral-500 outline-none focus:ring-2 focus:ring-cyan-500/50"
+                        className="w-full rounded-lg border border-[var(--dash-panel-border)] dash-text-primary pl-9 pr-3 py-2 text-sm placeholder-neutral-500 outline-none focus:ring-2 focus:ring-cyan-500/50"
+                        style={{ backgroundColor: "var(--dash-inset-bg)" }}
                       />
                     </div>
                   </div>
@@ -611,28 +692,31 @@ export default function CorridorMap() {
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: reduceMotion ? 0 : 0.05 }}
-                      className="rounded-lg bg-neutral-800/80 border border-neutral-700 p-2 text-center"
+                      className="rounded-lg border border-[var(--dash-panel-border)] p-2 text-center"
+                      style={{ backgroundColor: "var(--dash-inset-bg)" }}
                     >
-                      <div className="text-lg font-bold text-white">{stats.total}</div>
-                      <div className="text-[10px] text-neutral-500 uppercase">Mapped</div>
+                      <div className="text-lg font-bold dash-text-primary">{stats.total}</div>
+                      <div className="text-[10px] dash-text-subtle uppercase">Mapped</div>
                     </motion.div>
                     <motion.div
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: reduceMotion ? 0 : 0.08 }}
-                      className="rounded-lg bg-neutral-800/80 border border-neutral-700 p-2 text-center"
+                      className="rounded-lg border border-[var(--dash-panel-border)] p-2 text-center"
+                      style={{ backgroundColor: "var(--dash-inset-bg)" }}
                     >
                       <div className="text-lg font-bold text-amber-400">{stats.needsReview}</div>
-                      <div className="text-[10px] text-neutral-500 uppercase">Needs review</div>
+                      <div className="text-[10px] dash-text-subtle uppercase">Needs review</div>
                     </motion.div>
                     <motion.div
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: reduceMotion ? 0 : 0.11 }}
-                      className="rounded-lg bg-neutral-800/80 border border-neutral-700 p-2 text-center"
+                      className="rounded-lg border border-[var(--dash-panel-border)] p-2 text-center"
+                      style={{ backgroundColor: "var(--dash-inset-bg)" }}
                     >
                       <div className="text-lg font-bold text-red-400">{stats.failed}</div>
-                      <div className="text-[10px] text-neutral-500 uppercase">Failed</div>
+                      <div className="text-[10px] dash-text-subtle uppercase">Failed</div>
                     </motion.div>
                   </div>
 
@@ -647,16 +731,16 @@ export default function CorridorMap() {
                         <button
                           type="button"
                           onClick={() => setSelectedRun(null)}
-                          className="p-1 rounded text-neutral-400 hover:text-white"
+                          className="p-1 rounded dash-text-muted hover:dash-text-primary"
                           aria-label="Clear selection"
                         >
                           <X size={14} />
                         </button>
                       </div>
-                      <div className="font-mono text-sm text-white truncate" title={selectedRun._runId}>
+                      <div className="font-Poppins text-sm dash-text-primary truncate" title={selectedRun._runId}>
                         {selectedRun._runId}
                       </div>
-                      <div className="text-xs text-neutral-400 mt-1">
+                      <div className="text-xs dash-text-muted mt-1">
                         {selectedRun.status} &bull; {(selectedRun.must_review_count ?? 0) > 0 ? `${selectedRun.must_review_count} to review` : ""}
                       </div>
                       <Link
@@ -670,7 +754,7 @@ export default function CorridorMap() {
                   )}
 
                   <div>
-                    <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-2">
+                    <div className="text-xs font-medium dash-text-muted uppercase tracking-wider mb-2">
                       Runs ({listRuns.length})
                     </div>
                     <ul className="space-y-1">
@@ -684,7 +768,7 @@ export default function CorridorMap() {
                             animate={{ opacity: 1 }}
                             whileHover={reduceMotion ? undefined : { backgroundColor: "rgba(55, 65, 81, 0.5)" }}
                             className={`rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
-                              isSelected ? "border-cyan-500/50 bg-cyan-500/10" : "border-neutral-700 bg-neutral-800/50 hover:bg-neutral-800"
+                              isSelected ? "border-cyan-500/50 bg-cyan-500/10" : "border-[var(--dash-panel-border)] bg-[var(--dash-inset-bg)] hover:bg-[var(--dash-hover-bg)]"
                             }`}
                             onClick={() => handleSelectRun(run)}
                           >
@@ -705,12 +789,12 @@ export default function CorridorMap() {
                                 {run.status === "completed" && <CheckCircle2 size={10} />}
                                 {run.status}
                               </span>
-                              <span className="text-[10px] text-neutral-500">
+                              <span className="text-[10px] dash-text-subtle">
                                 {(run.must_review_count ?? 0) > 0 ? `${run.must_review_count} review` : ""}
                                 {pct != null ? ` ${pct}%` : ""}
                               </span>
                             </div>
-                            <div className="font-mono text-xs text-white truncate mt-1" title={run._runId}>
+                            <div className="font-Poppins text-xs dash-text-primary truncate mt-1" title={run._runId}>
                               {run._runId}
                             </div>
                             <Link
@@ -737,7 +821,8 @@ export default function CorridorMap() {
             exit={{ opacity: 0 }}
             type="button"
             onClick={() => setPanelOpen(true)}
-            className="absolute top-4 right-4 z-[1000] flex items-center gap-2 rounded-lg bg-[#0f1419] border border-neutral-700 text-white px-3 py-2 text-sm font-medium shadow-lg hover:bg-neutral-800 transition-colors"
+            className="absolute top-4 right-4 z-[1000] flex items-center gap-2 rounded-lg border border-[var(--dash-panel-border)] dash-text-primary px-3 py-2 text-sm font-medium shadow-lg hover:bg-[var(--dash-hover-bg)] transition-colors"
+            style={{ backgroundColor: "var(--dash-modal-aside)" }}
             aria-label="Open panel"
           >
             <ChevronLeft size={18} />

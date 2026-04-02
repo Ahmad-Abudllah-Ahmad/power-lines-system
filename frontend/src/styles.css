@@ -24,26 +24,248 @@
   transform: rotateY(180deg);
 }
 
-:root {
+/* ── Dark theme (default) ───────────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
   color-scheme: dark;
+
+  --body-bg: #0a0e27;
+  --body-color: rgb(245 245 245);
+
+  --layout-bg: #0a0e1a;
+  --layout-text: #ffffff;
+
+  --header-bg: rgba(13, 17, 23, 0.95);
+  --header-border: rgba(255, 255, 255, 0.06);
+
+  --divider: rgba(255, 255, 255, 0.1);
+
+  --user-chip-from: #404040;
+  --user-chip-to: #262626;
+  --user-chip-border: rgba(255, 255, 255, 0.1);
+  --user-chip-border-hover: rgba(255, 255, 255, 0.2);
+  --user-chip-icon: #a3a3a3;
+  --user-text: #a3a3a3;
+  --user-text-hover: #d4d4d4;
+
+  --theme-toggle-bg: rgba(255, 255, 255, 0.06);
+  --theme-toggle-border: rgba(255, 255, 255, 0.1);
+  --theme-toggle-hover-bg: rgba(255, 255, 255, 0.1);
+  --theme-toggle-color: #e5e5e5;
+  --theme-segment-active-bg: rgba(255, 255, 255, 0.14);
+  --theme-segment-active-fg: #f8fafc;
+  --theme-segment-active-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --theme-segment-muted: rgba(248, 250, 252, 0.42);
+
+  --glass-bg: rgba(17, 24, 39, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+
+  /* Dashboard & shared surfaces */
+  --dash-panel-bg: rgba(23, 23, 23, 0.55);
+  --dash-panel-border: #27272a;
+  --dash-panel-border-hover: #404040;
+  --dash-heading: #ffffff;
+  --dash-page-title: #f8fafc;
+  --dash-page-subtitle: #a1a1aa;
+  --dash-body: #e5e5e5;
+  --dash-muted: #a3a3a3;
+  --dash-subtle: #737373;
+  --dash-hover-bg: rgba(38, 38, 38, 0.5);
+  --dash-inset-bg: rgba(38, 38, 38, 0.85);
+  --dash-inset-border: #404040;
+  --dash-code-bg: #262626;
+  --dash-nested-bg: rgba(24, 24, 27, 0.5);
+  --dash-nested-bg-mid: rgba(24, 24, 27, 0.4);
+  --dash-nested-bg-soft: rgba(24, 24, 27, 0.35);
+  --dash-thumb-border-hover: #525252;
+  --dash-banner-overlay-bg: rgba(0, 0, 0, 0.45);
+  --dash-banner-overlay-border: rgba(255, 255, 255, 0.12);
+  --dash-banner-text: #e5e5e5;
+  --dash-banner-heading: #ffffff;
+  --dash-modal-bg: #0b0d12;
+  --dash-modal-aside: #0f1419;
+  --dash-skeleton: rgba(64, 64, 64, 0.45);
+  --dash-skeleton-strong: rgba(64, 64, 64, 0.55);
+  --dash-media-bg: #0a0a0a;
+  --dash-tile-selected: rgba(6, 182, 212, 0.15);
+  --dash-overlay-scrim: rgba(0, 0, 0, 0.92);
+  --dash-preview-border: #27272a;
+  --dash-elevated-bg: rgba(24, 24, 27, 0.82);
+  --dash-thumb-strip-bg: #0a0a0a;
+  --dash-panel-shadow: none;
+
+  /* Floating dock */
+  --dock-shell-bg: rgba(23, 23, 23, 0.95);
+  --dock-shell-border: #404040;
+  --dock-item-bg: #262626;
+  --dock-item-border: #404040;
+  --dock-fab-bg: #262626;
+  --dock-fab-border: #404040;
+  --dock-icon: #e5e5e5;
+  --dock-menu-icon: #a3a3a3;
+  --dock-tooltip-bg: #262626;
+  --dock-tooltip-border: #404040;
+  --dock-tooltip-text: #fafafa;
+  --dock-ring-offset: #0a0e1a;
+
+  /* Stat cards */
+  --stat-card-bg: linear-gradient(135deg, rgba(17, 24, 39, 0.92) 0%, rgba(31, 41, 55, 0.92) 100%);
+  --stat-card-border: #27272a;
+  --stat-label: #a3a3a3;
+  --stat-value: #ffffff;
+  --stat-sub: #a3a3a3;
+  --stat-pattern-dot: rgba(6, 182, 212, 0.3);
+  --stat-shine: rgba(255, 255, 255, 0.1);
+  --stat-card-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), 0 0 24px rgba(6, 182, 212, 0.08);
+  --stat-card-shadow-hover: 0 14px 40px rgba(0, 0, 0, 0.5), 0 0 32px rgba(6, 182, 212, 0.14);
+}
+
+/* ── Light theme — enterprise dashboard (cool neutral canvas, white surfaces) ─ */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Canvas: soft blue-gray (reads “product UI”, not flat printer paper) */
+  --body-bg: #eceff4;
+  --body-color: #101828;
+
+  --layout-bg: #eceff4;
+  --layout-text: #101828;
+
+  /* Header: clean white bar, crisp hairline */
+  --header-bg: #ffffff;
+  --header-border: #e4e7ec;
+
+  --divider: #e4e7ec;
+
+  /* User / chrome chips */
+  --user-chip-from: #f9fafb;
+  --user-chip-to: #f2f4f7;
+  --user-chip-border: #e4e7ec;
+  --user-chip-border-hover: #d0d5dd;
+  --user-chip-icon: #667085;
+  --user-text: #667085;
+  --user-text-hover: #344054;
+
+  /* Theme switch */
+  --theme-toggle-bg: #f2f4f7;
+  --theme-toggle-border: #e4e7ec;
+  --theme-toggle-hover-bg: #e8ecf1;
+  --theme-toggle-color: #344054;
+  --theme-segment-active-bg: #ffffff;
+  --theme-segment-active-fg: #101828;
+  --theme-segment-active-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 8px rgba(16, 24, 40, 0.06);
+  --theme-segment-muted: #98a2b3;
+
+  --glass-bg: rgba(255, 255, 255, 0.92);
+  --glass-border: #e4e7ec;
+
+  /* Cards & panels: pure white on canvas + subtle depth */
+  --dash-panel-bg: #ffffff;
+  --dash-panel-border: #e4e7ec;
+  --dash-panel-border-hover: #d0d5dd;
+  --dash-heading: #101828;
+  --dash-page-title: #0c111d;
+  --dash-page-subtitle: #667085;
+  --dash-body: #475467;
+  --dash-muted: #667085;
+  --dash-subtle: #98a2b3;
+  --dash-hover-bg: #f9fafb;
+  --dash-inset-bg: #f9fafb;
+  --dash-inset-border: #e4e7ec;
+  --dash-code-bg: #f2f4f7;
+  --dash-nested-bg: #ffffff;
+  --dash-nested-bg-mid: #fcfcfd;
+  --dash-nested-bg-soft: #f9fafb;
+  --dash-thumb-border-hover: #d0d5dd;
+  --dash-banner-overlay-bg: rgba(255, 255, 255, 0.94);
+  --dash-banner-overlay-border: #e4e7ec;
+  --dash-banner-text: #475467;
+  --dash-banner-heading: #101828;
+  --dash-modal-bg: #ffffff;
+  --dash-modal-aside: #f9fafb;
+  --dash-skeleton: rgba(152, 162, 179, 0.25);
+  --dash-skeleton-strong: rgba(152, 162, 179, 0.4);
+  --dash-media-bg: #f2f4f7;
+  --dash-tile-selected: rgba(6, 182, 212, 0.1);
+  --dash-overlay-scrim: rgba(16, 24, 40, 0.5);
+  --dash-preview-border: #e4e7ec;
+  --dash-elevated-bg: #ffffff;
+  --dash-thumb-strip-bg: #f2f4f7;
+  --dash-panel-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px rgba(16, 24, 40, 0.06);
+
+  /* Dock: floating white island */
+  --dock-shell-bg: #ffffff;
+  --dock-shell-border: #e4e7ec;
+  --dock-item-bg: #f9fafb;
+  --dock-item-border: #e4e7ec;
+  --dock-fab-bg: #f9fafb;
+  --dock-fab-border: #e4e7ec;
+  --dock-icon: #344054;
+  --dock-menu-icon: #667085;
+  --dock-tooltip-bg: #ffffff;
+  --dock-tooltip-border: #e4e7ec;
+  --dock-tooltip-text: #101828;
+  --dock-ring-offset: #eceff4;
+
+  /* KPI / stat tiles */
+  --stat-card-bg: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+  --stat-card-border: #e4e7ec;
+  --stat-label: #667085;
+  --stat-value: #101828;
+  --stat-sub: #667085;
+  --stat-pattern-dot: rgba(6, 182, 212, 0.14);
+  --stat-shine: rgba(16, 24, 40, 0.04);
+  --stat-card-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 8px 24px rgba(16, 24, 40, 0.06);
+  --stat-card-shadow-hover: 0 4px 12px rgba(16, 24, 40, 0.08), 0 16px 40px rgba(16, 24, 40, 0.1);
 }
 
 @layer base {
   body {
-    background-color: #0a0e27;
-    color: rgb(245 245 245);
+    background-color: var(--body-bg);
+    color: var(--body-color);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
+}
+
+/* Dashboard: Poppins (UI/body) + Outfit (headings) */
+.dashboard-page {
+  font-family: "Poppins", ui-sans-serif, system-ui, sans-serif;
+}
+
+.dashboard-page :where(h1, h2, h3, h4, h5, h6) {
+  font-family: "Outfit", "Poppins", ui-sans-serif, system-ui, sans-serif;
+}
+
+.dash-page-title {
+  font-family: "Outfit", "Poppins", sans-serif;
+  color: var(--dash-page-title);
+  letter-spacing: -0.03em;
+}
+
+.dash-page-subtitle {
+  font-family: "Poppins", sans-serif;
+  color: var(--dash-page-subtitle);
+  font-weight: 500;
+}
+
+.stat-card-themed {
+  box-shadow: var(--stat-card-shadow);
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.stat-card-themed:hover {
+  box-shadow: var(--stat-card-shadow-hover);
 }
 
 @layer utilities {
   .glass {
-    background: rgba(17, 24, 39, 0.7);
+    background: var(--glass-bg);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--glass-border);
   }
   
   .text-gradient {
@@ -173,5 +395,129 @@
 
   .animate-progress-indeterminate {
     animation: progress-indeterminate 1.5s ease-in-out infinite;
+  }
+
+  /* Theme-aware dashboard / layout helpers */
+  .dash-panel {
+    border-radius: 0.75rem;
+    border-width: 1px;
+    border-style: solid;
+    background-color: var(--dash-panel-bg);
+    border-color: var(--dash-panel-border);
+    box-shadow: var(--dash-panel-shadow);
+  }
+
+  .dash-panel-interactive:hover {
+    border-color: var(--dash-panel-border-hover);
+  }
+
+  .dash-nested {
+    border-radius: 0.5rem;
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--dash-panel-border);
+    background-color: var(--dash-nested-bg);
+  }
+
+  .dash-nested-mid {
+    background-color: var(--dash-nested-bg-mid);
+  }
+
+  .dash-nested-soft {
+    background-color: var(--dash-nested-bg-soft);
+  }
+
+  .dash-text-primary {
+    color: var(--dash-heading);
+  }
+
+  .dash-text-muted {
+    color: var(--dash-muted);
+  }
+
+  .dash-text-subtle {
+    color: var(--dash-subtle);
+  }
+
+  .dash-text-body {
+    color: var(--dash-body);
+  }
+
+  .border-dash {
+    border-color: var(--dash-panel-border);
+  }
+
+  .border-b-dash {
+    border-bottom-color: var(--dash-panel-border);
+  }
+
+  .border-t-dash {
+    border-top-color: var(--dash-panel-border);
+  }
+
+  .border-l-dash {
+    border-left-color: var(--dash-panel-border);
+  }
+
+  .dash-inset-pill {
+    background-color: var(--dash-inset-bg);
+    border-color: var(--dash-inset-border);
+  }
+
+  .dash-code {
+    background-color: var(--dash-code-bg);
+  }
+
+  .dash-banner-card {
+    background: var(--dash-banner-overlay-bg);
+    border: 1px solid var(--dash-banner-overlay-border);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  .dash-banner-heading {
+    color: var(--dash-banner-heading);
+  }
+
+  .dash-banner-body {
+    color: var(--dash-banner-text);
+  }
+
+  .dash-modal-surface {
+    background-color: var(--dash-modal-bg);
+  }
+
+  .dash-modal-aside {
+    background-color: var(--dash-modal-aside);
+  }
+
+  .dash-overlay-backdrop {
+    background-color: var(--dash-overlay-scrim);
+  }
+
+  .dash-hover-row:hover {
+    background-color: var(--dash-hover-bg);
+  }
+
+  .dock-shell {
+    border-color: var(--dock-shell-border);
+    background-color: var(--dock-shell-bg);
+  }
+
+  .dock-item-surface {
+    background-color: var(--dock-item-bg);
+    border-color: var(--dock-item-border);
+    color: var(--dock-icon);
+  }
+
+  .dock-fab {
+    background-color: var(--dock-fab-bg);
+    border-color: var(--dock-fab-border);
+  }
+
+  .dock-tooltip-surface {
+    background-color: var(--dock-tooltip-bg);
+    border-color: var(--dock-tooltip-border);
+    color: var(--dock-tooltip-text);
   }
 }

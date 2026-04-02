@@ -29,6 +29,7 @@ import {
   Layers,
   AlertTriangle,
   RefreshCw,
+  ChevronDown,
 } from "lucide-react";
 import { API_BASE } from "../api/api";
 
@@ -75,6 +76,9 @@ type RunEntry = {
   _created_ts?: number;
   files: FileInfo[];
 };
+
+/** Demo-only labels for Assign dropdown (no backend). */
+const ASSIGN_DEMO_USERS = ["A. Mammadov", "L. Hasanova", "R. Aliyev"];
 
 function safeIdFromLabel(label: string) {
   const base = (label || "COMPONENT")
@@ -251,6 +255,11 @@ export default function Runs() {
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(() => new Set());
+  const [assignDropdown, setAssignDropdown] = useState<{
+    runId: string;
+    top: number;
+    left: number;
+  } | null>(null);
   const [previewRun, setPreviewRun] = useState<RunEntry | null>(null);
   const [previewFileIdx, setPreviewFileIdx] = useState(0);
   const [videoFetchedDetections, setVideoFetchedDetections] = useState<any[]>([]);
@@ -310,6 +319,17 @@ export default function Runs() {
       /* ignore */
     }
   }, [fileCommentByRun]);
+
+  useEffect(() => {
+    if (!assignDropdown) return;
+    const close = () => setAssignDropdown(null);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [assignDropdown]);
 
   const setFileReviewStatus = useCallback((runId: string, fileKey: string, status: "approved" | "canceled" | undefined) => {
     setFileReviewStatusByRun((prev) => {
@@ -591,7 +611,7 @@ export default function Runs() {
             <div>
               <h1 class="text-3xl font-extrabold text-gray-900 uppercase tracking-wide">Component Defect Report</h1>
               <p class="text-gray-500 mt-1 font-medium">Transmission Line Asset Management</p>
-              <p class="text-xs text-gray-400 mt-2">Batch: <span class="font-mono">${run.run_id}</span> • Type: ${dtype.toUpperCase()} • Created: ${createdIso}</p>
+              <p class="text-xs text-gray-400 mt-2">Batch: <span class="font-Poppins">${run.run_id}</span> • Type: ${dtype.toUpperCase()} • Created: ${createdIso}</p>
             </div>
             <div class="mt-4 md:mt-0 text-right">
               <img src="${brandLogoSrc}" alt="AzərEnerji" class="h-12 md:h-14 w-auto object-contain ml-auto" />
@@ -926,8 +946,8 @@ export default function Runs() {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} className="space-y-6">
       <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Recent Uploads</h1>
-          <p className="text-neutral-400">All uploaded images and videos with detection results</p>
+          <h1 className="text-3xl font-bold dash-text-primary mb-2">Recent Uploads</h1>
+          <p className="dash-text-muted">All uploaded images and videos with detection results</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -935,8 +955,8 @@ export default function Runs() {
             disabled={selectedCount === 0}
             className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
               selectedCount === 0
-                ? "bg-neutral-800/60 border-neutral-700 text-neutral-500 cursor-not-allowed"
-                : "bg-cyan-500/20 border-cyan-500/50 text-cyan-200 hover:bg-cyan-500/30"
+                ? "bg-[var(--dash-nested-bg-mid)] border-[var(--dash-panel-border)] dash-text-subtle cursor-not-allowed"
+                : "bg-cyan-500/20 border-cyan-500/50 hover:bg-cyan-500/30"
             }`}
             title={selectedCount === 0 ? "Select one or more batches to generate a report" : `Generate report for ${selectedCount} batch(es)`}
           >
@@ -947,7 +967,8 @@ export default function Runs() {
               setLoading(true);
               fetchRuns();
             }}
-            className="flex items-center gap-2 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-white px-4 py-2 text-sm font-semibold hover:bg-neutral-700 transition-colors"
+            className="flex items-center gap-2 rounded-xl border border-[var(--dash-panel-border)] dash-text-body hover:dash-text-primary px-4 py-2 text-sm font-semibold hover:bg-[var(--dash-hover-bg)] transition-colors"
+            style={{ backgroundColor: "var(--dash-inset-bg)" }}
           >
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
@@ -955,25 +976,28 @@ export default function Runs() {
       </div>
 
       {/* Filters */}
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-4 backdrop-blur-sm">
+      <div className="rounded-2xl border border-[var(--dash-panel-border)] p-4 backdrop-blur-sm" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex-1 min-w-[200px] relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" size={18} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 dash-text-muted" size={18} />
             <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search by run ID or filename..."
-              className="w-full rounded-xl bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-500 pl-10 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50" />
+              className="w-full rounded-xl border placeholder-[var(--dash-subtle)] pl-10 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+              style={{ backgroundColor: "var(--dash-inset-bg)", borderColor: "var(--dash-inset-border)", color: "var(--dash-heading)" }} />
           </div>
           <div className="flex items-center gap-2">
-            <Filter className="text-neutral-400" size={18} />
+            <Filter className="dash-text-muted" size={18} />
             <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-              className="rounded-xl bg-neutral-800 border border-neutral-700 text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50">
+              className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+              style={{ backgroundColor: "var(--dash-inset-bg)", borderColor: "var(--dash-inset-border)", color: "var(--dash-heading)" }}>
               <option value="all">All types</option>
               <option value="image">Images</option>
               <option value="video">Videos</option>
               <option value="thermal">Thermal</option>
             </select>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-              className="rounded-xl bg-neutral-800 border border-neutral-700 text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50">
+              className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+              style={{ backgroundColor: "var(--dash-inset-bg)", borderColor: "var(--dash-inset-border)", color: "var(--dash-heading)" }}>
               <option value="all">All status</option>
               <option value="active">Processing</option>
               <option value="complete">Completed</option>
@@ -983,15 +1007,17 @@ export default function Runs() {
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="rounded-xl bg-neutral-800 border border-neutral-700 text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+                className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+                style={{ backgroundColor: "var(--dash-inset-bg)", borderColor: "var(--dash-inset-border)", color: "var(--dash-heading)" }}
                 aria-label="From date"
               />
-              <span className="text-neutral-500 text-xs">to</span>
+              <span className="dash-text-subtle text-xs">to</span>
               <input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="rounded-xl bg-neutral-800 border border-neutral-700 text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+                className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500/50"
+                style={{ backgroundColor: "var(--dash-inset-bg)", borderColor: "var(--dash-inset-border)", color: "var(--dash-heading)" }}
                 aria-label="To date"
               />
             </div>
@@ -1008,8 +1034,8 @@ export default function Runs() {
             { label: "Total Defects", value: runs.reduce((s, r) => s + r.total_defects, 0), color: "text-red-400" },
             { label: "Needs Review", value: runs.reduce((s, r) => s + r.needs_review, 0), color: "text-amber-400" },
           ].map(s => (
-            <div key={s.label} className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 backdrop-blur-sm">
-              <div className="text-xs text-neutral-400 mb-1">{s.label}</div>
+            <div key={s.label} className="rounded-xl border border-[var(--dash-panel-border)] p-4 backdrop-blur-sm" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
+              <div className="dash-text-muted mb-1">{s.label}</div>
               <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
             </div>
           ))}
@@ -1017,10 +1043,10 @@ export default function Runs() {
       )}
 
       {/* Table */}
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 overflow-hidden backdrop-blur-sm">
+      <div className="rounded-2xl border border-[var(--dash-panel-border)] overflow-hidden backdrop-blur-sm" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-neutral-800/50 text-neutral-300">
+            <thead className="dash-text-body" style={{ backgroundColor: "var(--dash-nested-bg-mid)" }}>
               <tr>
                 <th className="text-left px-6 py-4 font-semibold">Run ID</th>
                 <th className="text-left px-6 py-4 font-semibold">Type</th>
@@ -1032,12 +1058,12 @@ export default function Runs() {
                 <th className="text-right px-6 py-4 font-semibold">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-800">
+            <tbody className="divide-y divide-[var(--dash-panel-border)]">
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-6 py-16 text-center">
-                    <ScanSearch className="mx-auto text-neutral-500 mb-4" size={48} />
-                    <div className="text-neutral-400 font-medium">
+                    <ScanSearch className="mx-auto dash-text-subtle mb-4" size={48} />
+                    <div className="dash-text-muted font-medium">
                       {runs.length === 0
                         ? "No uploads yet. Go to AI Detection or Video Upload to process files."
                         : "No runs match your filters."}
@@ -1056,7 +1082,7 @@ export default function Runs() {
                       }}
                       initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                       transition={{ delay: Math.min(i * 0.02, 0.3) }}
-                      className={`hover:bg-neutral-800/50 transition-colors cursor-pointer ${
+                      className={`hover:bg-[var(--dash-hover-bg)] transition-colors cursor-pointer ${
                         batchFromQuery === run.run_id ? "ring-2 ring-inset ring-cyan-500/70 bg-cyan-500/[0.07]" : ""
                       }`}
                       onClick={() => openPreview(run)}
@@ -1074,9 +1100,9 @@ export default function Runs() {
                             className="h-4 w-4 accent-cyan-500"
                             aria-label={`Select batch ${run.run_id}`}
                           />
-                          <span className="font-mono text-white text-xs truncate max-w-[120px]" title={run.run_id}>{run.run_id}</span>
+                          <span className="font-Poppins dash-text-primary text-xs truncate max-w-[120px]" title={run.run_id}>{run.run_id}</span>
                           <button onClick={e => { e.stopPropagation(); copyRunId(run.run_id); }}
-                            className="p-1 rounded text-neutral-500 hover:text-white hover:bg-neutral-700 transition-colors" title="Copy">
+                            className="p-1 rounded dash-text-subtle hover:dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors" title="Copy">
                             <Copy size={12} />
                           </button>
                         </div>
@@ -1084,7 +1110,7 @@ export default function Runs() {
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold border ${
                           dtype === "image"
-                            ? "bg-blue-500/20 text-blue-300 border-blue-500/50"
+                            ? "bg-blue-500/20 border-blue-500/50"
                             : dtype === "thermal"
                               ? "bg-orange-500/20 text-orange-300 border-orange-500/50"
                               : "bg-purple-500/20 text-purple-300 border-purple-500/50"
@@ -1096,8 +1122,8 @@ export default function Runs() {
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold border ${
                           isRunBatchComplete(run.status)
-                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50"
-                            : "bg-amber-500/20 text-amber-400 border-amber-500/50"
+                            ? "bg-emerald-500/20 border-emerald-500/50"
+                            : "bg-amber-500/20 border-amber-500/50"
                         }`}>
                           {isRunBatchComplete(run.status) ? <CheckCircle2 size={12} /> : <Clock size={12} className="animate-spin" />}
                           {isRunBatchComplete(run.status) ? "COMPLETE" : "PROCESSING"}
@@ -1105,8 +1131,8 @@ export default function Runs() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          <Layers size={14} className="text-neutral-500" />
-                          <span className="text-neutral-300">{run.completed}/{run.total_files}</span>
+                          <Layers size={14} className="dash-text-subtle" />
+                          <span className="dash-text-body">{run.completed}/{run.total_files}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -1120,32 +1146,38 @@ export default function Runs() {
                             <AlertTriangle size={13} /> {run.needs_review}
                           </span>
                         ) : (
-                          <span className="text-neutral-500">0</span>
+                          <span className="dash-text-subtle">0</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-neutral-300 text-xs">{timeAgo(run.created_at)}</td>
+                      <td className="px-6 py-4 dash-text-body text-xs">{timeAgo(run.created_at)}</td>
                       <td className="px-6 py-4 text-right">
                         <div className="inline-flex items-center gap-2">
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              toggleSelectedRun(run.run_id);
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const minW = 176;
+                              const left = Math.min(Math.max(8, r.right - minW), window.innerWidth - minW - 8);
+                              setAssignDropdown((cur) =>
+                                cur?.runId === run.run_id ? null : { runId: run.run_id, top: r.bottom + 4, left }
+                              );
                             }}
-                            className={`inline-flex items-center gap-1 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors ${
-                              isSelected
-                                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30"
-                                : "bg-neutral-800/60 text-neutral-200 border-neutral-700 hover:bg-neutral-700"
-                            }`}
-                            title={isSelected ? "Unassign" : "Assign"}
+                            className="inline-flex items-center gap-1 rounded-xl border border-neutral-700 bg-neutral-800/60 px-3 py-2 text-sm font-semibold text-neutral-200 transition-colors hover:bg-neutral-700"
+                            title="Assign (demo)"
                           >
                             <CheckCircle2 size={14} /> Assign
+                            <ChevronDown
+                              size={14}
+                              className={assignDropdown?.runId === run.run_id ? "rotate-180 transition-transform" : "transition-transform"}
+                            />
                           </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               openPreview(run);
                             }}
-                            className="inline-flex items-center gap-1 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 px-3 py-2 text-sm font-semibold hover:bg-cyan-500/30 transition-colors"
+                            className="inline-flex items-center gap-1 rounded-xl bg-cyan-500/20 border border-cyan-500/50 px-3 py-2 text-sm font-semibold hover:bg-cyan-500/30 transition-colors"
                           >
                             <Eye size={14} /> View
                           </button>
@@ -1160,17 +1192,50 @@ export default function Runs() {
         </div>
       </div>
 
+      {assignDropdown && typeof document !== "undefined" && createPortal(
+        <>
+          <div
+            className="fixed inset-0 z-[150]"
+            aria-hidden
+            onClick={() => setAssignDropdown(null)}
+          />
+          <div
+            role="listbox"
+            aria-label="Assign to (demo)"
+            className="fixed z-[151] min-w-[11rem] rounded-xl border border-neutral-700 bg-neutral-900 py-1 shadow-lg"
+            style={{ top: assignDropdown.top, left: assignDropdown.left }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {ASSIGN_DEMO_USERS.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm text-neutral-200 hover:bg-neutral-800"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAssignDropdown(null);
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body
+      )}
+
       {/* Preview panel (portal: video | frame strip | sidebar, same as Video Upload) */}
       {previewRun && typeof document !== "undefined" && createPortal(
         <div
-          className="fixed inset-0 z-[200] flex min-h-0 min-w-0 flex-row items-stretch bg-black/90"
+          className="fixed inset-0 z-[200] flex min-h-0 min-w-0 flex-row items-stretch bg-[var(--dash-overlay-scrim)]"
           role="presentation"
           onClick={() => closePreview()}
         >
           <button
             type="button"
             onClick={() => closePreview()}
-            className="absolute top-4 right-4 z-10 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700 transition-colors"
+            className="absolute top-4 right-4 z-10 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors"
+            style={{ backgroundColor: "var(--dash-elevated-bg)" }}
           >
             <X size={24} />
           </button>
@@ -1180,14 +1245,16 @@ export default function Runs() {
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(-1); }}
-                className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700"
+                className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)]"
+                style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronLeft size={24} />
               </button>
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute right-[360px] top-1/2 z-10 -translate-y-1/2 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700 md:right-[580px]"
+                className="absolute right-[360px] top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] md:right-[580px]"
+                style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronRight size={24} />
               </button>
@@ -1197,7 +1264,8 @@ export default function Runs() {
           <div className="flex min-h-0 min-w-0 flex-1 flex-row items-stretch pt-14">
             {isDjiThermalScanUpload ? (
               <div
-                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-neutral-800 bg-[#06080c] md:border-r"
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-[var(--dash-panel-border)] md:border-r"
+                style={{ backgroundColor: "var(--dash-media-bg)" }}
                 onClick={e => e.stopPropagation()}
               >
                 <ThermalAnalysisDetailHeader
@@ -1245,7 +1313,7 @@ export default function Runs() {
                 >
                   {previewFile ? (
                     <div className="relative w-full max-w-5xl">
-                      <div className="absolute top-2 right-2 z-10 rounded-lg border border-neutral-700 bg-neutral-900/90 px-3 py-1.5 text-xs text-neutral-300">
+                      <div className="absolute top-2 right-2 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
                         {previewFileIdx + 1} / {completedFiles.length}
                       </div>
                       {previewRun.type === "video" && previewFile.video_url ? (
@@ -1284,13 +1352,13 @@ export default function Runs() {
                             )}
                         </div>
                       ) : (
-                        <div className="flex aspect-video w-full items-center justify-center rounded-xl bg-neutral-900 text-neutral-500">
+                        <div className="flex aspect-video w-full items-center justify-center rounded-xl dash-text-subtle" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
                           No preview available
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="text-lg text-neutral-500">No completed files to preview</div>
+                    <div className="text-lg dash-text-subtle">No completed files to preview</div>
                   )}
                 </div>
 
@@ -1308,39 +1376,40 @@ export default function Runs() {
           </div>
 
           <div
-            className="flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-hidden border-l border-neutral-800 bg-[#0f1419] pt-14"
+            className="flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-hidden border-l border-[var(--dash-panel-border)] pt-14"
+            style={{ backgroundColor: "var(--dash-modal-aside)" }}
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="p-4 border-b border-neutral-800">
+            <div className="p-4 border-b border-[var(--dash-panel-border)]">
               <div className="flex items-center gap-2 mb-2">
                 <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
                   runDisplayType(previewRun) === "image"
-                    ? "bg-blue-500/20 text-blue-300 border-blue-500/50"
+                    ? "bg-blue-500/20 border-blue-500/50"
                     : runDisplayType(previewRun) === "thermal"
                       ? "bg-orange-500/20 text-orange-300 border-orange-500/50"
                       : "bg-purple-500/20 text-purple-300 border-purple-500/50"
                 }`}>{runDisplayType(previewRun).toUpperCase()}</span>
                 <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
-                  isRunBatchComplete(previewRun.status) ? "bg-green-500/20 text-green-300 border-green-500/50" : "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                  isRunBatchComplete(previewRun.status) ? "bg-green-500/20 border-green-500/50" : "bg-amber-500/20 text-amber-300 border-amber-500/50"
                 }`}>{isRunBatchComplete(previewRun.status) ? "COMPLETE" : "PROCESSING"}</span>
               </div>
-              <div className="text-sm font-mono text-neutral-400 truncate" title={previewRun.run_id}>ID: {previewRun.run_id}</div>
-              <div className="text-xs text-neutral-500 mt-1">{timeAgo(previewRun.created_at)}</div>
+              <div className="text-sm font-Poppins dash-text-muted truncate" title={previewRun.run_id}>ID: {previewRun.run_id}</div>
+              <div className="text-xs dash-text-subtle mt-1">{timeAgo(previewRun.created_at)}</div>
             </div>
 
             {/* Stats */}
-            <div className="p-4 border-b border-neutral-800 grid grid-cols-2 gap-3">
+            <div className="p-4 border-b border-[var(--dash-panel-border)] grid grid-cols-2 gap-3">
               <div>
-                <div className="text-xs text-neutral-400">Total Files</div>
-                <div className="text-xl font-bold text-white">{previewRun.total_files}</div>
+                <div className="text-xs dash-text-muted">Total Files</div>
+                <div className="text-xl font-bold dash-text-primary">{previewRun.total_files}</div>
               </div>
               <div>
-                <div className="text-xs text-neutral-400">Completed</div>
-                <div className="text-xl font-bold text-white">{previewRun.completed}</div>
+                <div className="text-xs dash-text-muted">Completed</div>
+                <div className="text-xl font-bold dash-text-primary">{previewRun.completed}</div>
               </div>
               <div>
-                <div className="text-xs text-neutral-400">Defects Found</div>
+                <div className="text-xs dash-text-muted">Defects Found</div>
                 <div className={`text-xl font-bold ${previewRun.total_defects > 0 ? "text-red-400" : "text-green-400"}`}>
                   {previewRun.total_defects}
                 </div>
@@ -1349,38 +1418,38 @@ export default function Runs() {
 
             {/* Current file details */}
             {previewFile && (
-              <div className="p-4 border-b border-neutral-800">
-                <div className="text-xs text-neutral-400 mb-2">Current File</div>
-                <div className="text-sm text-white truncate font-medium" title={previewFile.filename}>{previewFile.filename}</div>
+              <div className="p-4 border-b border-[var(--dash-panel-border)]">
+                <div className="text-xs dash-text-muted mb-2">Current File</div>
+                <div className="text-sm dash-text-primary truncate font-medium" title={previewFile.filename}>{previewFile.filename}</div>
                 {previewRun.type !== "video" && previewFile.stats && (
                   <div className="mt-3 space-y-2 text-xs">
-                    <div className="flex justify-between text-neutral-300">
+                    <div className="flex justify-between dash-text-body">
                       <span>Defects</span>
-                      <span className="text-white font-semibold">{previewFile.stats.total_defects}</span>
+                      <span className="dash-text-primary font-semibold">{previewFile.stats.total_defects}</span>
                     </div>
-                    <div className="flex justify-between text-neutral-300">
+                    <div className="flex justify-between dash-text-body">
                       <span>Processing Time</span>
-                      <span className="text-white font-semibold">{previewFile.stats.processing_time_ms}ms</span>
+                      <span className="dash-text-primary font-semibold">{previewFile.stats.processing_time_ms}ms</span>
                     </div>
                   </div>
                 )}
                 {previewRun.type === "video" && (
                   <div className="mt-3 space-y-2 text-xs">
-                    <div className="flex justify-between text-neutral-300">
+                    <div className="flex justify-between dash-text-body">
                       <span>Detections</span>
-                      <span className="text-white font-semibold">{previewFile.total_detections || 0}</span>
+                      <span className="dash-text-primary font-semibold">{previewFile.total_detections || 0}</span>
                     </div>
-                    <div className="flex justify-between text-neutral-300">
+                    <div className="flex justify-between dash-text-body">
                       <span>Duration</span>
-                      <span className="text-white font-semibold">{formatDuration(previewFile.duration || 0)}</span>
+                      <span className="dash-text-primary font-semibold">{formatDuration(previewFile.duration || 0)}</span>
                     </div>
-                    <div className="flex justify-between text-neutral-300">
+                    <div className="flex justify-between dash-text-body">
                       <span>FPS</span>
-                      <span className="text-white font-semibold">{previewFile.fps || 0}</span>
+                      <span className="dash-text-primary font-semibold">{previewFile.fps || 0}</span>
                     </div>
-                    <div className="flex justify-between text-neutral-300">
+                    <div className="flex justify-between dash-text-body">
                       <span>Frames Analyzed</span>
-                      <span className="text-white font-semibold">{previewFile.frames_analyzed || 0}</span>
+                      <span className="dash-text-primary font-semibold">{previewFile.frames_analyzed || 0}</span>
                     </div>
                   </div>
                 )}
@@ -1403,8 +1472,8 @@ export default function Runs() {
               }, 0);
               if (!rows.length) return null;
               return (
-                <div className="max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-b border-neutral-800 p-4">
-                  <div className="text-xs text-neutral-400 mb-2">
+                <div className="max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-b border-[var(--dash-panel-border)] p-4">
+                  <div className="text-xs dash-text-muted mb-2">
                     Detections ({rows.length})
                   </div>
                   <div className="space-y-1">
@@ -1414,7 +1483,7 @@ export default function Runs() {
                           key={`${rowKeyBase}-${i}`}
                           className="flex items-center justify-between py-1 text-xs"
                         >
-                          <span className="max-w-[140px] truncate text-white">
+                          <span className="max-w-[140px] truncate dash-text-primary">
                             {(() => {
                               const raw = d?.class_name;
                               const norm = String(raw ?? "").trim().toLowerCase().replaceAll("-", " ").replaceAll("_", " ");
@@ -1433,7 +1502,7 @@ export default function Runs() {
 
             {/* File list */}
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <div className="text-xs text-neutral-400 mb-3">All Files ({previewRun.files.length})</div>
+              <div className="text-xs dash-text-muted mb-3">All Files ({previewRun.files.length})</div>
               <div className="space-y-1.5">
                 {previewRun.files.map((f, idx) => {
                   const cIdx = completedFiles.indexOf(f);
@@ -1450,21 +1519,21 @@ export default function Runs() {
                           if (cIdx >= 0) setPreviewFileIdx(cIdx);
                         }}
                         className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
-                          isActive ? "bg-cyan-500/20 border border-cyan-500/50" : "hover:bg-neutral-800 border border-transparent"
+                          isActive ? "bg-cyan-500/20 border border-cyan-500/50" : "hover:bg-[var(--dash-hover-bg)] border border-transparent"
                         } ${f.status !== "done" ? "opacity-50 cursor-default" : "cursor-pointer"}`}
                       >
                       {f.thumb_url ? (
                         <img src={f.thumb_url} className="w-8 h-8 rounded object-cover flex-shrink-0" alt="" />
                       ) : (
-                        <div className="w-8 h-8 rounded bg-neutral-800 flex items-center justify-center flex-shrink-0">
-                          {runDisplayType(previewRun) === "video" ? <Video size={12} className="text-neutral-500" /> : runDisplayType(previewRun) === "thermal" ? <Thermometer size={12} className="text-neutral-500" /> : <Image size={12} className="text-neutral-500" />}
+                        <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
+                          {runDisplayType(previewRun) === "video" ? <Video size={12} className="dash-text-subtle" /> : runDisplayType(previewRun) === "thermal" ? <Thermometer size={12} className="dash-text-subtle" /> : <Image size={12} className="dash-text-subtle" />}
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <div className="text-[11px] text-white truncate">{f.filename}</div>
-                        <div className="text-[10px] text-neutral-500">
+                        <div className="text-[11px] dash-text-primary truncate">{f.filename}</div>
+                        <div className="text-[10px] dash-text-subtle">
                           {f.status === "done" ? (
-                            <span className="text-green-400">{previewRun.type === "video" ? `${f.total_detections || 0} detections` : `${f.stats?.total_defects || 0} defects`}</span>
+                            <span>{previewRun.type === "video" ? `${f.total_detections || 0} detections` : `${f.stats?.total_defects || 0} defects`}</span>
                           ) : f.status === "processing" ? (
                             <span className="text-amber-400">Processing...</span>
                           ) : f.status === "error" ? (
@@ -1477,7 +1546,7 @@ export default function Runs() {
                       {f.status === "done" && (
                         <div className="flex items-center gap-1 min-w-[190px] justify-end">
                           {reviewStatus === "approved" ? (
-                            <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                            <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold">
                               Approved
                             </span>
                           ) : reviewStatus === "canceled" ? (
@@ -1496,7 +1565,8 @@ export default function Runs() {
                               setActiveCommentEditorKey(editorKey);
                               setCommentDraft(comment || "");
                             }}
-                            className="rounded-md border border-neutral-700 bg-neutral-800/60 px-2 py-1 text-neutral-300 hover:text-white hover:bg-neutral-700/60 transition-colors"
+                            className="rounded-md border border-[var(--dash-panel-border)] px-2 py-1 dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                            style={{ backgroundColor: "var(--dash-nested-bg-mid)" }}
                             title="Comment"
                             aria-label="Comment"
                           >
@@ -1510,8 +1580,8 @@ export default function Runs() {
                             }}
                             className={`rounded-md border px-2 py-1 transition-colors ${
                               reviewStatus === "approved"
-                                ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
-                                : "border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:text-white hover:bg-neutral-700/60"
+                                ? "border-emerald-500/60 bg-emerald-500/15"
+                                : "border-[var(--dash-panel-border)] bg-[var(--dash-nested-bg-mid)] dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)]"
                             }`}
                             title="Approve"
                             aria-label="Approve"
@@ -1527,7 +1597,7 @@ export default function Runs() {
                             className={`rounded-md border px-2 py-1 transition-colors ${
                               reviewStatus === "canceled"
                                 ? "border-red-500/60 bg-red-500/15 text-red-200"
-                                : "border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:text-white hover:bg-neutral-700/60"
+                                : "border-[var(--dash-panel-border)] bg-[var(--dash-nested-bg-mid)] dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)]"
                             }`}
                             title="Cancel"
                             aria-label="Cancel"
@@ -1536,15 +1606,15 @@ export default function Runs() {
                           </button>
                         </div>
                       )}
-                      {f.status === "done" && <CheckCircle2 size={12} className="text-green-400 flex-shrink-0" />}
+                      {f.status === "done" && <CheckCircle2 size={12} className="flex-shrink-0" />}
                       {f.status === "processing" && <Clock size={12} className="text-amber-400 animate-spin flex-shrink-0" />}
                       {f.status === "error" && <XCircle size={12} className="text-red-400 flex-shrink-0" />}
                       </button>
                       {f.status === "done" && (comment.trim() || editorOpen) ? (
                         <div className="px-3 pb-3 -mt-1">
-                          <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-3">
+                          <div className="rounded-lg border border-[var(--dash-panel-border)] p-3" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
                             <div className="flex items-center justify-between gap-3">
-                              <div className="text-[11px] font-semibold text-neutral-300">Comment</div>
+                              <div className="text-[11px] font-semibold dash-text-body">Comment</div>
                               {editorOpen ? (
                                 <div className="flex items-center gap-2">
                                   <button
@@ -1565,7 +1635,8 @@ export default function Runs() {
                                       setCommentDraft(comment || "");
                                       setActiveCommentEditorKey(null);
                                     }}
-                                    className="rounded-md border border-neutral-700 bg-neutral-800/60 px-2 py-1 text-[11px] font-semibold text-neutral-300 hover:text-white hover:bg-neutral-700/60 transition-colors"
+                                    className="rounded-md border border-[var(--dash-panel-border)] px-2 py-1 text-[11px] font-semibold dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                                    style={{ backgroundColor: "var(--dash-nested-bg-mid)" }}
                                   >
                                     Cancel
                                   </button>
@@ -1579,10 +1650,11 @@ export default function Runs() {
                                 onClick={(e) => e.stopPropagation()}
                                 rows={2}
                                 placeholder="Add a note for this image (will appear in the report as Human suggestion)"
-                                className="mt-2 w-full resize-none rounded-lg bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-500 px-3 py-2 text-[12px] outline-none focus:ring-2 focus:ring-cyan-500/40"
+                                className="mt-2 w-full resize-none rounded-lg border placeholder-[var(--dash-subtle)] px-3 py-2 text-[12px] outline-none focus:ring-2 focus:ring-cyan-500/40"
+                                style={{ backgroundColor: "var(--dash-inset-bg)", borderColor: "var(--dash-inset-border)", color: "var(--dash-heading)" }}
                               />
                             ) : (
-                              <div className="mt-2 text-[12px] text-neutral-300">{comment}</div>
+                              <div className="mt-2 text-[12px] dash-text-body">{comment}</div>
                             )}
                           </div>
                         </div>
@@ -1598,7 +1670,7 @@ export default function Runs() {
               previewFile &&
               (previewFile.total_detections || 0) > 0 &&
               videoDetectionsLoading && (
-                <div className="shrink-0 border-b border-neutral-800 p-4 text-xs text-neutral-500">Loading defect list…</div>
+                <div className="shrink-0 border-b border-[var(--dash-panel-border)] p-4 text-xs dash-text-subtle">Loading defect list…</div>
               )}
             {previewRun.type === "video" && (() => {
               if (!previewFile) return null;
@@ -1609,8 +1681,8 @@ export default function Runs() {
               const rowKeyBase = videoResultsFolderId(previewFile) || previewFile.file_id || previewFile.filename;
               if (!rows.length) return null;
               return (
-                <div className="max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-b border-neutral-800 p-4">
-                  <div className="text-xs text-neutral-400 mb-2">
+                <div className="max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-b border-[var(--dash-panel-border)] p-4">
+                  <div className="text-xs dash-text-muted mb-2">
                     Detections ({rows.length})
                   </div>
                   <div className="space-y-1">
@@ -1620,7 +1692,7 @@ export default function Runs() {
                           key={`${rowKeyBase}-${i}`}
                           className="flex items-center justify-between py-1 text-xs"
                         >
-                          <span className="max-w-[140px] truncate text-white">
+                          <span className="max-w-[140px] truncate dash-text-primary">
                             {d.class_name}
                           </span>
                         </div>

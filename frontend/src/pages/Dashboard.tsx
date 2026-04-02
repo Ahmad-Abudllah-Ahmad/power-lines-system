@@ -27,6 +27,7 @@ import {
   API_BASE,
   type Run,
 } from "../api/api";
+import { useTheme } from "../context/ThemeContext";
 import { toast } from "../components/Toast";
 import { VideoAnnotatedFrameStrip } from "../components/VideoAnnotatedFrameStrip";
 import {
@@ -63,7 +64,6 @@ import {
   Check,
 } from "lucide-react";
 
-const COLORS = ["#10b981", "#f59e0b", "#ef4444", "#6b7280"]; // completed, processing, failed, pending
 const DAYS = 14;
 const EMPTY_GALLERY_URLS: string[] = [];
 
@@ -197,6 +197,47 @@ function extractUrlsFromRunPayload(run: Run): { urls: string[]; filenames: strin
 const RECENT_UPLOADS_LIMIT = 8;
 const RECENT_UPLOADS_CAROUSEL_MAX = 8;
 
+const HOW_IT_WORKS_SLIDES = [
+  {
+    imageSrc: "/banner-powerline.jpg",
+    alt: "Digital and field power line inspection",
+    title: "Blueprint to live inspection",
+    meta: "Digital twin · corridor intelligence",
+    accent: "blue" as const,
+    steps: [
+      "Align schematic and photographic views of lines and structures",
+      "Monitor uploads, batches, and thermal runs in one dashboard",
+      "Export evidence that ties engineering context to site findings",
+    ],
+  },
+  {
+    imageSrc: "/Drone_Powerline_Inspection_articleheaderimage.jpg",
+    alt: "Drone inspecting transmission lines",
+    title: "Single image inspection",
+    meta: "RGB workflow · AI-assisted review",
+    accent: "cyan" as const,
+    steps: [
+      "Upload RGB image (thermal optional) with tower details",
+      "AI detects components and classifies defects automatically",
+      "Review detections and download a detailed incident report",
+    ],
+  },
+  {
+    imageSrc: "/images.jpg",
+    alt: "Power infrastructure inspection",
+    title: "Batch & thermal analysis",
+    meta: "Scale processing · thermal insights",
+    accent: "violet" as const,
+    steps: [
+      "Upload multiple images at once; results organized by defect type",
+      "Thermal imaging for hot spots, corona patterns, and anomalies",
+      "Download statistics and risk-focused reports for your fleet",
+    ],
+  },
+];
+
+const HOW_IT_WORKS_INTERVAL_MS = 5000;
+
 type DashboardRunFile = {
   file_id?: string;
   filename?: string;
@@ -278,20 +319,20 @@ function RecentUploadThumbnailSlider({
   }, [slideUrls.length]);
   if (loading && slideUrls.length === 0) {
     return (
-      <div className="absolute inset-0 bg-neutral-800 animate-pulse flex items-center justify-center">
-        <Clock className="text-neutral-600 w-6 h-6 animate-spin" />
+      <div className="absolute inset-0 bg-[var(--dash-inset-bg)] animate-pulse flex items-center justify-center">
+        <Clock className="text-[var(--dash-subtle)] w-6 h-6 animate-spin" />
       </div>
     );
   }
   if (slideUrls.length === 0) {
     return (
-      <div className="absolute inset-0 bg-neutral-800 flex items-center justify-center">
-        <ImageIcon className="w-7 h-7 text-neutral-600" />
+      <div className="absolute inset-0 bg-[var(--dash-inset-bg)] flex items-center justify-center">
+        <ImageIcon className="w-7 h-7 text-[var(--dash-subtle)]" />
       </div>
     );
   }
   return (
-    <div className="absolute inset-0 bg-neutral-900 overflow-hidden">
+    <div className="absolute inset-0 bg-[var(--dash-media-bg)] overflow-hidden">
       {slideUrls.map((u, i) => (
         <img
           key={`${runId}-${u}-${i}`}
@@ -305,10 +346,218 @@ function RecentUploadThumbnailSlider({
         />
       ))}
       {slideUrls.length > 1 && (
-        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-[2] rounded-full bg-black/65 px-1.5 py-0.5 text-[9px] text-neutral-200 font-mono tabular-nums">
+        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-[2] rounded-full bg-black/65 px-1.5 py-0.5 text-[9px] text-neutral-200 font-Poppins tabular-nums">
           {idx + 1}/{slideUrls.length}
         </div>
       )}
+    </div>
+  );
+}
+
+type StatusDistRow = {
+  name: string;
+  value: number;
+  color: string;
+  track: string;
+  pct: number;
+};
+
+function StatusDistributionInfographic({
+  rows,
+  pieData,
+  total,
+  chart,
+}: {
+  rows: StatusDistRow[];
+  pieData: StatusDistRow[];
+  total: number;
+  chart: {
+    pieCell: string;
+    ttBg: string;
+    ttBorderCyan: string;
+    ttShadow: string;
+    ttLabel: string;
+    ttItem: string;
+  };
+}) {
+  const leftCol = rows.slice(0, 2);
+  const rightCol = rows.slice(2, 4);
+
+  const rowBlock = (row: StatusDistRow, side: "left" | "right") => {
+    const textBlock = (
+      <div
+        className={`min-w-0 flex-1 max-w-[11rem] xl:max-w-[13rem] ${side === "left" ? "text-right" : "text-left"}`}
+      >
+        <div className="text-sm font-semibold dash-text-primary tracking-tight" style={{ fontFamily: '"Outfit", sans-serif' }}>
+          {row.name}
+        </div>
+        <div className="text-xs dash-text-muted mt-0.5 font-medium">
+          {row.value} {row.value === 1 ? "upload" : "uploads"} · {total > 0 ? `${row.pct}%` : "0%"}
+        </div>
+      </div>
+    );
+    const swatch = (
+      <span
+        className="h-3 w-3 shrink-0 rounded-full shadow-sm ring-2 ring-[var(--dash-panel-border)]"
+        style={{ backgroundColor: row.color }}
+        aria-hidden
+      />
+    );
+    return (
+      <div
+        key={row.name}
+        className={`flex items-center gap-4 w-full ${side === "left" ? "flex-row justify-end" : "flex-row justify-start"}`}
+      >
+        {side === "left" ? (
+          <>
+            {textBlock}
+            {swatch}
+          </>
+        ) : (
+          <>
+            {swatch}
+            {textBlock}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="w-full">
+      {/* Mobile: center donut + legend rows (swatch only, no mini donuts) */}
+      <div className="flex flex-col items-stretch gap-5 lg:hidden">
+        <div className="relative mx-auto flex h-[192px] w-[192px] shrink-0 items-center justify-center">
+          {pieData.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={56}
+                    outerRadius={78}
+                    paddingAngle={2}
+                    dataKey="value"
+                    nameKey="name"
+                    strokeWidth={1}
+                    stroke={chart.pieCell}
+                  >
+                    {pieData.map((entry) => (
+                      <Cell key={entry.name} fill={entry.color} stroke={chart.pieCell} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: chart.ttBg,
+                      border: `1px solid ${chart.ttBorderCyan}`,
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      boxShadow: chart.ttShadow,
+                    }}
+                    labelStyle={{ color: chart.ttLabel }}
+                    itemStyle={{ color: chart.ttItem }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span
+                  className="text-3xl font-bold tabular-nums dash-text-primary tracking-tight"
+                  style={{ fontFamily: '"Outfit", sans-serif' }}
+                >
+                  {total}
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider dash-text-muted mt-0.5">
+                  Total uploads
+                </span>
+              </div>
+            </>
+          ) : null}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {rows.map((row) => (
+            <div
+              key={row.name}
+              className="flex items-center gap-3 rounded-xl border border-dash px-3 py-2.5 dash-inset-pill"
+            >
+              <span
+                className="h-3 w-3 shrink-0 rounded-full shadow-sm ring-2 ring-[var(--dash-panel-border)]"
+                style={{ backgroundColor: row.color }}
+                aria-hidden
+              />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold dash-text-primary" style={{ fontFamily: '"Outfit", sans-serif' }}>
+                  {row.name}
+                </div>
+                <div className="text-xs dash-text-muted">
+                  {row.value} · {total > 0 ? `${row.pct}%` : "0%"}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Desktop: labels separated from center donut (infographic spacing) */}
+      <div className="hidden lg:flex lg:flex-row lg:items-center lg:justify-between lg:gap-4 min-h-[220px] px-1">
+        <div className="flex flex-col justify-center gap-6 flex-1 min-w-0 max-w-[200px] xl:max-w-[220px]">
+          {leftCol.map((r) => rowBlock(r, "left"))}
+        </div>
+
+        <div className="relative flex h-[200px] w-[200px] xl:h-[220px] xl:w-[220px] shrink-0 items-center justify-center">
+          {pieData.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={58}
+                    outerRadius={84}
+                    paddingAngle={2}
+                    dataKey="value"
+                    nameKey="name"
+                    strokeWidth={1}
+                    stroke={chart.pieCell}
+                  >
+                    {pieData.map((entry) => (
+                      <Cell key={entry.name} fill={entry.color} stroke={chart.pieCell} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: chart.ttBg,
+                      border: `1px solid ${chart.ttBorderCyan}`,
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      boxShadow: chart.ttShadow,
+                    }}
+                    labelStyle={{ color: chart.ttLabel }}
+                    itemStyle={{ color: chart.ttItem }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span
+                  className="text-3xl xl:text-[2rem] font-bold tabular-nums dash-text-primary tracking-tight"
+                  style={{ fontFamily: '"Outfit", sans-serif' }}
+                >
+                  {total}
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider dash-text-muted mt-0.5 text-center px-2">
+                  Total uploads
+                </span>
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col justify-center gap-6 flex-1 min-w-0 max-w-[200px] xl:max-w-[220px]">
+          {rightCol.map((r) => rowBlock(r, "right"))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -358,14 +607,128 @@ export default function Dashboard() {
   const [dashThermalRoiLoading, setDashThermalRoiLoading] = useState(false);
   const [batchDetailTab, setBatchDetailTab] = useState<"image" | "processing">("image");
   const reduceMotion = useReducedMotion();
+  const { theme } = useTheme();
+  const chart = useMemo(() => {
+    const L = theme === "light";
+    return {
+      grid: L ? "rgba(100,116,139,0.22)" : "rgba(148,163,184,0.18)",
+      axis: L ? "rgba(71,85,105,0.9)" : "rgba(148,163,184,0.85)",
+      ttBg: L ? "rgba(255,255,255,0.97)" : "rgba(15, 20, 25, 0.92)",
+      ttBorderCyan: L ? "rgba(13, 148, 136, 0.45)" : "rgba(45, 212, 191, 0.38)",
+      ttShadow: L ? "0 18px 48px rgba(15,23,42,0.1)" : "0 18px 48px rgba(0,0,0,0.45)",
+      ttLabel: L ? "rgba(15,23,42,0.9)" : "rgba(226,232,240,0.9)",
+      ttItem: L ? "rgba(30,41,59,0.94)" : "rgba(226,232,240,0.92)",
+      cursorCyan: L ? "rgba(20, 184, 166, 0.18)" : "rgba(45, 212, 191, 0.12)",
+      cursorAmber: L ? "rgba(249, 115, 22, 0.18)" : "rgba(251, 146, 60, 0.14)",
+      pieLabel: L ? "rgba(15,23,42,0.94)" : "rgba(226,232,240,0.92)",
+      pieStroke: L ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.55)",
+      pieCell: L ? "rgba(100, 116, 139, 0.18)" : "rgba(148, 163, 184, 0.2)",
+      barStrokeCyan: L ? "rgba(13, 148, 136, 0.35)" : "rgba(45, 212, 191, 0.45)",
+      barStrokeAmber: L ? "rgba(234, 88, 12, 0.35)" : "rgba(251, 146, 60, 0.4)",
+      ttBorderAmber: L ? "rgba(249, 115, 22, 0.45)" : "rgba(251, 146, 60, 0.4)",
+      /** Status donut — semantic quartet, balanced on light / dark UI */
+      status: {
+        Completed: {
+          fill: L ? "#059669" : "#4ade80",
+          track: L ? "#ecfdf5" : "rgba(30, 41, 55, 0.88)",
+        },
+        Processing: {
+          fill: L ? "#d97706" : "#fbbf24",
+          track: L ? "#fffbeb" : "rgba(30, 41, 55, 0.88)",
+        },
+        Failed: {
+          fill: L ? "#e11d48" : "#fb7185",
+          track: L ? "#fff1f2" : "rgba(30, 41, 55, 0.88)",
+        },
+        Pending: {
+          fill: L ? "#6366f1" : "#a5b4fc",
+          track: L ? "#eef2ff" : "rgba(30, 41, 55, 0.88)",
+        },
+      },
+      /** Uploads — teal ladder (depth → highlight) */
+      uploadsBarStops: L
+        ? ["#0f766e", "#14b8a6", "#99f6e4"]
+        : ["#5eead4", "#2dd4bf", "#0f766e"],
+      /** Needs review — warm orange ladder */
+      needsReviewBarStops: L
+        ? ["#c2410c", "#f97316", "#fdba74"]
+        : ["#fb923c", "#ea580c", "#7c2d12"],
+    };
+  }, [theme]);
 
-  // Auto-advance slides every 5 seconds
+  /** Quick actions + hero carousel: light = high-contrast cards (not dark-glass tints). */
+  const dashHero = useMemo(() => {
+    const L = theme === "light";
+    return {
+      quickRgb: L
+        ? "block rounded-xl border border-cyan-200/90 bg-gradient-to-br from-white via-cyan-50/90 to-sky-100/50 p-3 text-left shadow-sm shadow-slate-900/[0.04] hover:border-cyan-400 hover:shadow-md hover:shadow-cyan-600/10 transition-all group"
+        : "block rounded-xl border border-cyan-500/30 bg-gradient-to-br from-cyan-900/20 to-blue-900/10 p-3 text-left hover:border-cyan-500/60 transition-all group",
+      quickThermal: L
+        ? "block rounded-xl border border-orange-200/90 bg-gradient-to-br from-white via-orange-50/90 to-amber-50/50 p-3 text-left shadow-sm shadow-slate-900/[0.04] hover:border-orange-400 hover:shadow-md hover:shadow-orange-600/10 transition-all group"
+        : "block rounded-xl border border-orange-500/30 bg-gradient-to-br from-orange-900/20 to-red-900/10 p-3 text-left hover:border-orange-500/60 transition-all group",
+      quickVideo: L
+        ? "block rounded-xl border border-violet-200/90 bg-gradient-to-br from-white via-violet-50/90 to-indigo-50/50 p-3 text-left shadow-sm shadow-slate-900/[0.04] hover:border-violet-400 hover:shadow-md hover:shadow-violet-600/10 transition-all group"
+        : "block rounded-xl border border-purple-500/30 bg-gradient-to-br from-purple-900/20 to-indigo-900/10 p-3 text-left hover:border-purple-500/60 transition-all group",
+      quickIconRgb: L
+        ? "w-9 h-9 rounded-lg bg-cyan-100 flex items-center justify-center shrink-0 ring-1 ring-cyan-200/80"
+        : "w-9 h-9 rounded-lg bg-cyan-500/20 flex items-center justify-center shrink-0",
+      quickIconThermal: L
+        ? "w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center shrink-0 ring-1 ring-orange-200/80"
+        : "w-9 h-9 rounded-lg bg-orange-500/20 flex items-center justify-center shrink-0",
+      quickIconVideo: L
+        ? "w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center shrink-0 ring-1 ring-violet-200/80"
+        : "w-9 h-9 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0",
+      quickGlyphRgb: L ? "text-cyan-600" : "text-cyan-400",
+      quickGlyphThermal: L ? "text-orange-600" : "text-orange-400",
+      quickGlyphVideo: L ? "text-violet-600" : "text-purple-400",
+      quickTitle: L ? "text-xs font-semibold text-slate-800 leading-tight tracking-tight" : "text-xs font-semibold text-white leading-tight",
+      arrow: L
+        ? "p-2 rounded-full bg-white/95 hover:bg-white border border-slate-200 hover:border-cyan-400/50 shadow-md text-slate-700 transition-colors"
+        : "p-2 rounded-full bg-black/30 hover:bg-black/50 border border-neutral-700 hover:border-cyan-400/50 transition-colors",
+      arrowIcon: L ? "text-slate-800" : "text-white",
+    };
+  }, [theme]);
+
+  const howItWorksCount = HOW_IT_WORKS_SLIDES.length;
+  const howItWorksAutoplayRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const restartHowItWorksAutoplay = useCallback(() => {
+    if (howItWorksAutoplayRef.current) {
+      clearInterval(howItWorksAutoplayRef.current);
+      howItWorksAutoplayRef.current = null;
+    }
+    howItWorksAutoplayRef.current = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % howItWorksCount);
+    }, HOW_IT_WORKS_INTERVAL_MS);
+  }, [howItWorksCount]);
+
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % 3);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    restartHowItWorksAutoplay();
+    return () => {
+      if (howItWorksAutoplayRef.current) {
+        clearInterval(howItWorksAutoplayRef.current);
+        howItWorksAutoplayRef.current = null;
+      }
+    };
+  }, [restartHowItWorksAutoplay]);
+
+  const goHowItWorksPrev = useCallback(() => {
+    setCurrentSlide((prev) => (prev - 1 + howItWorksCount) % howItWorksCount);
+    restartHowItWorksAutoplay();
+  }, [howItWorksCount, restartHowItWorksAutoplay]);
+
+  const goHowItWorksNext = useCallback(() => {
+    setCurrentSlide((prev) => (prev + 1) % howItWorksCount);
+    restartHowItWorksAutoplay();
+  }, [howItWorksCount, restartHowItWorksAutoplay]);
+
+  const goHowItWorksIndex = useCallback(
+    (index: number) => {
+      setCurrentSlide(index);
+      restartHowItWorksAutoplay();
+    },
+    [restartHowItWorksAutoplay]
+  );
 
   useEffect(() => {
     setLoading(true);
@@ -474,18 +837,28 @@ export default function Dashboard() {
       .map(([date, v]) => ({ date: date.slice(5), runs: v.runs, mustReview: v.mustReview }));
   }, [filteredRuns, chartStart]);
 
-  const statusPie = useMemo(() => {
+  const statusDistribution = useMemo(() => {
     const completed = filteredRuns.filter((r) => r.status === "completed").length;
     const processing = filteredRuns.filter((r) => r.status === "processing").length;
     const failed = filteredRuns.filter((r) => r.status === "failed").length;
     const pending = filteredRuns.filter((r) => r.status === "pending").length;
-    return [
-      { name: "Completed", value: completed, color: COLORS[0] },
-      { name: "Processing", value: processing, color: COLORS[1] },
-      { name: "Failed", value: failed, color: COLORS[2] },
-      { name: "Pending", value: pending, color: COLORS[3] },
-    ].filter((d) => d.value > 0);
-  }, [filteredRuns]);
+    const total = completed + processing + failed + pending;
+    const order = ["Completed", "Processing", "Failed", "Pending"] as const;
+    const vals = { Completed: completed, Processing: processing, Failed: failed, Pending: pending };
+    const rows: StatusDistRow[] = order.map((name) => {
+      const value = vals[name];
+      const spec = chart.status[name];
+      return {
+        name,
+        value,
+        color: spec.fill,
+        track: spec.track,
+        pct: total > 0 ? Math.round((value / total) * 100) : 0,
+      };
+    });
+    const pieData = rows.filter((d) => d.value > 0);
+    return { rows, pieData, total };
+  }, [filteredRuns, chart]);
 
   const recentRuns = useMemo(
     () => [...filteredRuns].sort((a, b) => runTime(b) - runTime(a)).slice(0, RECENT_UPLOADS_LIMIT),
@@ -859,25 +1232,25 @@ export default function Dashboard() {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="space-y-6"
+        className="space-y-6 dashboard-page"
       >
         <div>
-          <div className="h-8 w-40 bg-neutral-700/50 rounded mb-2 animate-pulse" />
-          <div className="h-4 w-56 bg-neutral-700/40 rounded animate-pulse" />
+          <div className="h-8 w-40 rounded mb-2 animate-pulse bg-[var(--dash-skeleton)]" />
+          <div className="h-4 w-56 rounded animate-pulse bg-[var(--dash-skeleton)] opacity-90" />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 animate-pulse">
-              <div className="h-4 w-20 bg-neutral-700/50 rounded mb-3" />
-              <div className="h-8 w-16 bg-neutral-700/60 rounded" />
+            <div key={i} className="dash-panel p-4 animate-pulse">
+              <div className="h-4 w-20 rounded mb-3 bg-[var(--dash-skeleton)]" />
+              <div className="h-8 w-16 rounded bg-[var(--dash-skeleton-strong)]" />
             </div>
           ))}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 h-64 animate-pulse" />
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 h-64 animate-pulse" />
+          <div className="dash-panel p-6 h-64 animate-pulse" />
+          <div className="dash-panel p-6 h-64 animate-pulse" />
         </div>
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 animate-pulse h-48" />
+        <div className="dash-panel p-6 animate-pulse h-48" />
       </motion.div>
     );
   }
@@ -887,30 +1260,27 @@ export default function Dashboard() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={transition}
-      className="space-y-6"
+      className="space-y-6 dashboard-page"
     >
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Dashboard</h1>
-          <p className="text-neutral-400">Inspection overview</p>
+          <h1 className="text-3xl font-bold mb-2 dash-page-title">Dashboard</h1>
+          <p className="dash-page-subtitle">Inspection overview</p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
           <motion.div
             whileHover={reduceMotion ? undefined : { y: -2, transition: { duration: 0.15 } }}
             className="max-w-[220px]"
           >
-            <Link
-              to="/ai-detection"
-              className="block rounded-xl border border-cyan-500/30 bg-gradient-to-br from-cyan-900/20 to-blue-900/10 p-3 text-left hover:border-cyan-500/60 transition-all group"
-            >
+            <Link to="/ai-detection" className={dashHero.quickRgb}>
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-9 h-9 rounded-lg bg-cyan-500/20 flex items-center justify-center shrink-0">
-                  <ImageIcon size={18} className="text-cyan-400" />
+                <div className={dashHero.quickIconRgb}>
+                  <ImageIcon size={18} className={dashHero.quickGlyphRgb} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h4 className="text-xs font-semibold text-white leading-tight">RGB image</h4>
+                  <h4 className={dashHero.quickTitle}>RGB image</h4>
                 </div>
-                <Plus size={16} className="text-cyan-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Plus size={16} className={`${dashHero.quickGlyphRgb} shrink-0 opacity-0 group-hover:opacity-100 transition-opacity`} />
               </div>
             </Link>
           </motion.div>
@@ -920,18 +1290,15 @@ export default function Dashboard() {
             whileHover={reduceMotion ? undefined : { y: -2, transition: { duration: 0.15 } }}
             className="max-w-[220px]"
           >
-            <Link
-              to="/ai-detection?mode=thermal"
-              className="block rounded-xl border border-orange-500/30 bg-gradient-to-br from-orange-900/20 to-red-900/10 p-3 text-left hover:border-orange-500/60 transition-all group"
-            >
+            <Link to="/ai-detection?mode=thermal" className={dashHero.quickThermal}>
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-9 h-9 rounded-lg bg-orange-500/20 flex items-center justify-center shrink-0">
-                  <Thermometer size={18} className="text-orange-400" />
+                <div className={dashHero.quickIconThermal}>
+                  <Thermometer size={18} className={dashHero.quickGlyphThermal} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h4 className="text-xs font-semibold text-white leading-tight">Thermal analysis</h4>
+                  <h4 className={dashHero.quickTitle}>Thermal analysis</h4>
                 </div>
-                <Plus size={16} className="text-orange-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Plus size={16} className={`${dashHero.quickGlyphThermal} shrink-0 opacity-0 group-hover:opacity-100 transition-opacity`} />
               </div>
             </Link>
           </motion.div>
@@ -941,170 +1308,126 @@ export default function Dashboard() {
             whileHover={reduceMotion ? undefined : { y: -2, transition: { duration: 0.15 } }}
             className="max-w-[220px]"
           >
-            <Link
-              to="/video-upload"
-              className="block rounded-xl border border-purple-500/30 bg-gradient-to-br from-purple-900/20 to-indigo-900/10 p-3 text-left hover:border-purple-500/60 transition-all group"
-            >
+            <Link to="/ai-detection?mode=video" className={dashHero.quickVideo}>
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-9 h-9 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0">
-                  <Video size={18} className="text-purple-400" />
+                <div className={dashHero.quickIconVideo}>
+                  <Video size={18} className={dashHero.quickGlyphVideo} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h4 className="text-xs font-semibold text-white leading-tight">Upload video</h4>
+                  <h4 className={dashHero.quickTitle}>Upload video</h4>
                 </div>
-                <Plus size={16} className="text-purple-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Plus size={16} className={`${dashHero.quickGlyphVideo} shrink-0 opacity-0 group-hover:opacity-100 transition-opacity`} />
               </div>
             </Link>
           </motion.div>
         </div>
       </div>
 
-      {/* How It Works Banner Carousel */}
+      {/* How It Works — gradient frame carousel (image left, copy on same panel) */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="relative rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-cyan-900/20 to-blue-900/20 overflow-hidden"
+        className="w-full"
       >
-        {/* Background Image */}
-        <div className="absolute inset-0 opacity-20">
-          <img 
-            src="/banner-powerline.jpg" 
-            alt="Power transmission infrastructure"
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              // Fallback if image doesn't exist - hide the error
-              (e.target as HTMLImageElement).style.display = 'none';
+        <div className="rounded-[24px] bg-transparent p-0">
+          <div
+            className="relative min-h-[220px] overflow-hidden rounded-[24px] sm:min-h-[240px] md:min-h-[260px]"
+            style={{
+              background:
+                theme === "light"
+                  ? "linear-gradient(90deg, #263388 0%, #3247A4 45%, #AD7CF3 100%)"
+                  : "linear-gradient(90deg, #050505 0%, #171717 40%, #525252 100%)",
             }}
-          />
-        </div>
-        
-        {/* Slide Container */}
-        <div className="relative h-48 md:h-56 z-10">
-          {/* Slide 1: Single Image Upload */}
-          {currentSlide === 0 && (
-            <motion.div
-              key="slide-1"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3 }}
-              className="absolute inset-0 flex items-center justify-end p-6 md:p-8"
-            >
-              <div className="flex justify-end">
-                <div className="bg-black/40 backdrop-blur-sm rounded-lg p-4 md:p-6 border border-white/10 max-w-3xl">
-                  <h3 className="text-xl md:text-2xl font-bold text-white mb-2">Single Image Upload</h3>
-                  <div className="space-y-2 text-sm md:text-base text-neutral-200">
-                    <div className="flex items-start gap-2">
-                      <span className="text-cyan-400 font-bold">1.</span>
-                      <span>Upload RGB image (thermal optional) with tower details</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-cyan-400 font-bold">2.</span>
-                      <span>AI detects components and classifies defects automatically</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-cyan-400 font-bold">3.</span>
-                      <span>Review detections and download detailed incident report</span>
+          >
+            {HOW_IT_WORKS_SLIDES.map((card, index) => {
+              const stepAccent =
+                card.accent === "blue"
+                  ? "text-sky-200 font-semibold tabular-nums shrink-0"
+                  : card.accent === "cyan"
+                    ? "text-cyan-200 font-semibold tabular-nums shrink-0"
+                    : "text-violet-200 font-semibold tabular-nums shrink-0";
+              return (
+                <motion.div
+                  key={card.imageSrc}
+                  role="tabpanel"
+                  aria-hidden={currentSlide !== index}
+                  initial={false}
+                  animate={{ opacity: currentSlide === index ? 1 : 0 }}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                  className={`absolute inset-0 flex min-h-0 flex-col gap-3 p-2.5 sm:gap-4 sm:p-3 md:flex-row md:items-stretch md:gap-6 md:min-h-[240px] lg:min-h-[260px] ${
+                    currentSlide === index ? "z-[1]" : "z-0 pointer-events-none"
+                  }`}
+                >
+                  <div className="flex w-full shrink-0 flex-col md:h-full md:w-[36%] md:max-w-md">
+                    <div className="flex min-h-[152px] flex-1 flex-col sm:min-h-[168px] md:min-h-0 md:h-full">
+                      <div className="relative min-h-[152px] flex-1 overflow-hidden rounded-xl bg-black/20 sm:min-h-[168px] md:min-h-[208px] md:h-full">
+                        <img
+                          src={card.imageSrc}
+                          alt={card.alt}
+                          className="absolute inset-0 h-full w-full object-cover object-bottom"
+                          loading={index === 0 ? "eager" : "lazy"}
+                        />
+                        <div
+                          className="pointer-events-none absolute inset-0 rounded-xl opacity-40"
+                          style={{
+                            boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.1)",
+                          }}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
 
-          {/* Slide 2: Bulk Batch Processing */}
-          {currentSlide === 1 && (
-            <motion.div
-              key="slide-2"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3 }}
-              className="absolute inset-0 flex items-center justify-end p-6 md:p-8"
-            >
-              <div className="flex justify-end">
-                <div className="bg-black/40 backdrop-blur-sm rounded-lg p-4 md:p-6 border border-white/10 max-w-3xl">
-                  <h3 className="text-xl md:text-2xl font-bold text-white mb-2">Bulk Batch Processing</h3>
-                  <div className="space-y-2 text-sm md:text-base text-neutral-200">
-                    <div className="flex items-start gap-2">
-                      <span className="text-blue-400 font-bold">1.</span>
-                      <span>Upload multiple images at once for batch processing</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-blue-400 font-bold">2.</span>
-                      <span>Images are automatically organized by defect type</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-blue-400 font-bold">3.</span>
-                      <span>Download comprehensive statistics report with all images</span>
-                    </div>
+                  <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 py-1 pr-[3.25rem] text-white md:pl-1 md:pr-20">
+                    <h3 className="text-lg font-bold leading-tight tracking-tight text-white sm:text-xl md:text-2xl lg:text-[1.65rem]">
+                      {card.title}
+                    </h3>
+                    <p className="text-xs font-medium text-white/75 sm:text-sm">{card.meta}</p>
+                    <ul className="mt-1 space-y-2 text-left text-xs leading-snug text-white/90 sm:text-sm md:space-y-2.5">
+                      {card.steps.map((line, i) => (
+                        <li key={i} className="flex items-start gap-2">
+                          <span className={stepAccent}>{i + 1}.</span>
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
+                </motion.div>
+              );
+            })}
 
-          {/* Slide 3: Thermal Hot Spots & Corona Discharge */}
-          {currentSlide === 2 && (
-            <motion.div
-              key="slide-3"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3 }}
-              className="absolute inset-0 flex items-center justify-end p-6 md:p-8"
+            <button
+              type="button"
+              onClick={goHowItWorksPrev}
+              className={`absolute left-2 top-1/2 z-20 -translate-y-1/2 md:left-3 ${dashHero.arrow}`}
+              aria-label="Previous slide"
             >
-              <div className="flex justify-end">
-                <div className="bg-black/40 backdrop-blur-sm rounded-lg p-4 md:p-6 border border-white/10 max-w-3xl">
-                  <h3 className="text-xl md:text-2xl font-bold text-white mb-2">Thermal Hot Spots & Corona Discharge Detection</h3>
-                  <div className="space-y-2 text-sm md:text-base text-neutral-200">
-                    <div className="flex items-start gap-2">
-                      <span className="text-orange-400 font-bold">1.</span>
-                      <span>Upload thermal images to detect hot spots and temperature anomalies</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-orange-400 font-bold">2.</span>
-                      <span>AI identifies corona discharge patterns and electrical faults</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-orange-400 font-bold">3.</span>
-                      <span>Get detailed analysis with temperature readings and risk assessment</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
+              <ChevronLeft className={dashHero.arrowIcon} size={20} />
+            </button>
+            <button
+              type="button"
+              onClick={goHowItWorksNext}
+              className={`absolute right-2 top-1/2 z-20 -translate-y-1/2 md:right-3 ${dashHero.arrow}`}
+              aria-label="Next slide"
+            >
+              <ChevronRight className={dashHero.arrowIcon} size={20} />
+            </button>
+          </div>
         </div>
 
-        {/* Navigation Dots */}
-        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-2">
-          {[0, 1, 2].map((index) => (
+        <div className="mt-3 flex justify-center gap-2">
+          {HOW_IT_WORKS_SLIDES.map((_, index) => (
             <button
               key={index}
-              onClick={() => setCurrentSlide(index)}
-              className={`h-2 rounded-full transition-all ${
-                currentSlide === index
-                  ? "w-8 bg-cyan-400"
-                  : "w-2 bg-neutral-600 hover:bg-neutral-500"
+              type="button"
+              onClick={() => goHowItWorksIndex(index)}
+              className={`rounded-full transition-all ${
+                currentSlide === index ? "h-2 w-8 bg-[#3247A4]" : "h-2.5 w-2.5 border-2 border-[#3247A4]/45 bg-transparent hover:border-[#3247A4]/70"
               }`}
               aria-label={`Go to slide ${index + 1}`}
+              aria-current={currentSlide === index ? "true" : undefined}
             />
           ))}
         </div>
-
-        {/* Navigation Arrows */}
-        <button
-          onClick={() => setCurrentSlide((prev) => (prev - 1 + 3) % 3)}
-          className="absolute left-4 top-1/2 transform -translate-y-1/2 p-2 rounded-full bg-black/30 hover:bg-black/50 border border-neutral-700 hover:border-cyan-400/50 transition-colors"
-          aria-label="Previous slide"
-        >
-          <ChevronLeft className="text-white" size={20} />
-        </button>
-        <button
-          onClick={() => setCurrentSlide((prev) => (prev + 1) % 3)}
-          className="absolute right-4 top-1/2 transform -translate-y-1/2 p-2 rounded-full bg-black/30 hover:bg-black/50 border border-neutral-700 hover:border-cyan-400/50 transition-colors"
-          aria-label="Next slide"
-        >
-          <ChevronRight className="text-white" size={20} />
-        </button>
       </motion.div>
 
       {error && (
@@ -1181,15 +1504,15 @@ export default function Dashboard() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ ...transition, delay: reduceMotion ? 0 : i * 0.05 }}
                   whileHover={reduceMotion ? undefined : { y: -2, transition: { duration: 0.15 } }}
-                  className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 hover:border-neutral-700 transition-colors group relative"
+                  className="dash-panel dash-panel-interactive p-4 transition-colors group relative"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider flex items-center gap-1">
+                    <span className="font-medium dash-text-muted uppercase tracking-wider flex items-center gap-1">
                       {kpi.label}
                       {kpi.tooltip && (
                         <span
                           title={kpi.tooltip}
-                          className="text-neutral-500 hover:text-neutral-300 cursor-help"
+                          className="dash-text-subtle hover:text-[var(--dash-body)] cursor-help"
                         >
                           <HelpCircle size={12} />
                         </span>
@@ -1210,8 +1533,8 @@ export default function Dashboard() {
                       }
                     />
                   </div>
-                  <div className="text-2xl font-bold text-white">{kpi.value}</div>
-                  {kpi.sub ? <div className="text-xs text-neutral-500 mt-0.5">{kpi.sub}</div> : null}
+                  <div className="text-2xl font-bold dash-text-primary">{kpi.value}</div>
+                  {kpi.sub ? <div className="text-xs dash-text-subtle mt-0.5">{kpi.sub}</div> : null}
                 </motion.div>
               );
             })}
@@ -1223,9 +1546,9 @@ export default function Dashboard() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...transition, delay: reduceMotion ? 0 : 0.08 }}
-              className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"
+              className="dash-panel p-4"
             >
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold dash-text-primary mb-3 flex items-center gap-2">
                 <BarChart3 size={16} className="text-cyan-400" />
                 Top Defect Types
               </h3>
@@ -1233,9 +1556,9 @@ export default function Dashboard() {
                 {topDefectTypes.map(({ name, value }) => (
                   <div
                     key={name}
-                    className="flex items-center gap-2 bg-neutral-800/80 rounded-lg px-3 py-2 border border-neutral-700"
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 border dash-inset-pill"
                   >
-                    <span className="text-sm font-medium text-white capitalize">{name}</span>
+                    <span className="text-sm font-medium dash-text-primary capitalize">{name}</span>
                     <span className="text-xs font-bold text-cyan-400">{value}</span>
                   </div>
                 ))}
@@ -1259,8 +1582,8 @@ export default function Dashboard() {
                 <div className="flex items-center gap-3">
                   <Upload className="text-premium-accent" size={20} />
                   <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-semibold text-white">Latest Bulk Batch</h3>
-                    <span className="text-xs text-neutral-400">
+                    <h3 className="text-lg font-semibold dash-text-primary">Latest Bulk Batch</h3>
+                    <span className="text-xs dash-text-muted">
                       {latestBulkBatch.batch_id && (() => {
                         try {
                           const match = latestBulkBatch.batch_id.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
@@ -1307,19 +1630,19 @@ export default function Dashboard() {
                   className="px-6 pb-6 space-y-4 border-t border-premium-accent/30"
                 >
                   <div>
-                    <div className="text-sm text-neutral-300 mb-3">
+                    <div className="text-sm dash-text-body mb-3">
                       Organized into <span className="text-premium-accent font-semibold">{Object.keys(latestBulkBatch.organization.folders || {}).length}</span> defect type folders
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                       {(Object.entries(latestBulkBatch.organization.folders || {}) as [string, number][]).map(([folder, count]) => (
                         <div
                           key={folder}
-                          className="glass rounded-lg border border-neutral-700 p-3 hover:border-premium-accent/50 transition-colors"
+                          className="glass rounded-lg border border-dash p-3 hover:border-premium-accent/50 transition-colors"
                         >
                           <div className="text-premium-accent font-semibold text-sm capitalize">
                             {String(folder).replace(/_/g, " ")}
                           </div>
-                          <div className="text-neutral-300 text-xs mt-1">
+                          <div className="dash-text-body text-xs mt-1">
                             {count} image{count !== 1 ? "s" : ""}
                           </div>
                         </div>
@@ -1327,8 +1650,8 @@ export default function Dashboard() {
                     </div>
                   </div>
                   
-                  <div className="flex items-center gap-2 text-xs text-neutral-400 pt-3 border-t border-premium-accent/30">
-                    <code className="bg-neutral-800 px-2 py-1 rounded">{latestBulkBatch.batch_dir || "outputs/bulk_processing/"}</code>
+                  <div className="flex items-center gap-2 text-xs dash-text-muted pt-3 border-t border-premium-accent/30">
+                    <code className="dash-code px-2 py-1 rounded">{latestBulkBatch.batch_dir || "outputs/bulk_processing/"}</code>
                     <div className="ml-auto flex items-center gap-3">
                       <Link
                         to="/bulk-upload"
@@ -1357,17 +1680,17 @@ export default function Dashboard() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...transition, delay: reduceMotion ? 0 : 0.15 }}
-              className="rounded-xl border border-neutral-800 bg-neutral-900/50 overflow-hidden"
+              className="dash-panel overflow-hidden"
             >
               {/* Dropdown Header */}
               <button
                 onClick={() => setBulkBatchesDropdownOpen(!bulkBatchesDropdownOpen)}
-                className="w-full flex items-center justify-between p-6 hover:bg-neutral-800/50 transition-colors"
+                className="w-full flex items-center justify-between p-6 dash-hover-row transition-colors"
               >
                 <div className="flex items-center gap-2">
                   <Upload className="text-cyan-400" size={20} />
-                  <h3 className="text-lg font-semibold text-white">Recent Bulk Batches</h3>
-                  <span className="text-xs text-neutral-400 bg-neutral-800 px-2 py-1 rounded">
+                  <h3 className="text-lg font-semibold dash-text-primary">Recent Bulk Batches</h3>
+                  <span className="text-xs dash-text-muted dash-code px-2 py-1 rounded">
                     {recentBulkBatches.length}
                   </span>
                 </div>
@@ -1381,9 +1704,9 @@ export default function Dashboard() {
                     <ChevronRight size={14} />
                   </Link>
                   {bulkBatchesDropdownOpen ? (
-                    <ChevronUp className="text-neutral-400" size={20} />
+                    <ChevronUp className="dash-text-muted" size={20} />
                   ) : (
-                    <ChevronDown className="text-neutral-400" size={20} />
+                    <ChevronDown className="dash-text-muted" size={20} />
                   )}
                 </div>
               </button>
@@ -1395,7 +1718,7 @@ export default function Dashboard() {
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="px-6 pb-6 space-y-3 border-t border-neutral-800"
+                  className="px-6 pb-6 space-y-3 border-t border-dash"
                 >
                 {recentBulkBatches.map((batch) => {
                   const formatBatchDate = (batchId: string) => {
@@ -1422,17 +1745,17 @@ export default function Dashboard() {
                   return (
                     <div
                       key={batch.batch_id}
-                      className="glass rounded-lg border border-neutral-700 p-4 hover:border-cyan-500/50 transition-colors"
+                      className="glass rounded-lg border border-dash p-4 hover:border-cyan-500/50 transition-colors"
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div>
-                          <div className="text-sm font-semibold text-white mb-1">
+                          <div className="text-sm font-semibold dash-text-primary mb-1">
                             Batch {batch.batch_id ? formatBatchDate(batch.batch_id) : batchId}
                           </div>
-                          <code className="text-xs text-neutral-500 font-mono">{batchId}</code>
+                          <code className="text-xs dash-text-subtle font-Poppins">{batchId}</code>
                         </div>
                         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 text-xs">
-                          <span className="flex items-center gap-1 text-neutral-300">
+                          <span className="flex items-center gap-1 dash-text-body">
                             <ImageIcon size={12} />
                             {Number(batch.processed ?? 0)} images
                           </span>
@@ -1454,7 +1777,7 @@ export default function Dashboard() {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-neutral-800">
+                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-dash">
                         <a
                           href={bulkBatchReportUrl(batchId)}
                           download={`batch_report_${batchId}.pdf`}
@@ -1487,29 +1810,29 @@ export default function Dashboard() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ ...transition, delay: reduceMotion ? 0 : 0.1 }}
-              className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"
+              className="dash-panel p-4"
             >
-              <h3 className="text-sm font-semibold text-white mb-4">Uploads per day (last 14 days)</h3>
+              <h3 className="font-semibold dash-text-primary mb-4">Uploads per day (last 14 days)</h3>
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={runsPerDay} margin={{ top: 6, right: 6, left: -20, bottom: 0 }} barCategoryGap={10}>
                     <defs>
                       <linearGradient id="uploadsBarGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.95} />
-                        <stop offset="65%" stopColor="#06b6d4" stopOpacity={0.65} />
-                        <stop offset="100%" stopColor="#0891b2" stopOpacity={0.35} />
+                        <stop offset="0%" stopColor={chart.uploadsBarStops[0]} stopOpacity={1} />
+                        <stop offset="55%" stopColor={chart.uploadsBarStops[1]} stopOpacity={0.88} />
+                        <stop offset="100%" stopColor={chart.uploadsBarStops[2]} stopOpacity={0.42} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="2 6" stroke="rgba(148,163,184,0.18)" vertical={false} />
+                    <CartesianGrid strokeDasharray="2 6" stroke={chart.grid} vertical={false} />
                     <XAxis
                       dataKey="date"
-                      stroke="rgba(148,163,184,0.85)"
+                      stroke={chart.axis}
                       fontSize={11}
                       tickLine={false}
                       axisLine={false}
                     />
                     <YAxis
-                      stroke="rgba(148,163,184,0.85)"
+                      stroke={chart.axis}
                       fontSize={11}
                       allowDecimals={false}
                       tickLine={false}
@@ -1518,22 +1841,22 @@ export default function Dashboard() {
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "rgba(15, 20, 25, 0.92)",
-                        border: "1px solid rgba(6, 182, 212, 0.35)",
+                        backgroundColor: chart.ttBg,
+                        border: `1px solid ${chart.ttBorderCyan}`,
                         borderRadius: "8px",
                         fontSize: "12px",
-                        boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
+                        boxShadow: chart.ttShadow,
                       }}
-                      labelStyle={{ color: "rgba(226,232,240,0.9)" }}
-                      itemStyle={{ color: "rgba(226,232,240,0.92)" }}
-                      cursor={{ fill: "rgba(34,211,238,0.08)" }}
+                      labelStyle={{ color: chart.ttLabel }}
+                      itemStyle={{ color: chart.ttItem }}
+                      cursor={{ fill: chart.cursorCyan }}
                     />
                     <Bar
                       dataKey="runs"
                       name="Uploads"
                       fill="url(#uploadsBarGrad)"
                       radius={[10, 10, 6, 6]}
-                      stroke="rgba(34,211,238,0.35)"
+                      stroke={chart.barStrokeCyan}
                       strokeWidth={1}
                     />
                   </BarChart>
@@ -1544,70 +1867,20 @@ export default function Dashboard() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ ...transition, delay: reduceMotion ? 0 : 0.15 }}
-              className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"
+              className="dash-panel p-4"
             >
-              <h3 className="text-sm font-semibold text-white mb-4">Status distribution</h3>
-              <div className="h-52">
-                {statusPie.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <defs>
-                        <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
-                          <feDropShadow dx="0" dy="10" stdDeviation="10" floodColor="rgba(0,0,0,0.45)" />
-                          <feDropShadow dx="0" dy="0" stdDeviation="6" floodColor="rgba(34,211,238,0.20)" />
-                        </filter>
-                      </defs>
-                      <Pie
-                        data={statusPie}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={48}
-                        outerRadius={72}
-                        paddingAngle={2}
-                        dataKey="value"
-                        nameKey="name"
-                        label={({ cx, cy, midAngle, innerRadius, outerRadius, name, value }) => {
-                          const RAD = Math.PI / 180;
-                          const r = innerRadius + (outerRadius - innerRadius) * 0.62;
-                          const x = (cx as number) + r * Math.cos(-midAngle * RAD);
-                          const y = (cy as number) + r * Math.sin(-midAngle * RAD);
-                          return (
-                            <text
-                              x={x}
-                              y={y}
-                              textAnchor={x > (cx as number) ? "start" : "end"}
-                              dominantBaseline="central"
-                              fill="rgba(226,232,240,0.92)"
-                              fontSize={11}
-                              fontWeight={600}
-                              style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.55)", strokeWidth: 3 }}
-                            >
-                              {`${name} ${value}`}
-                            </text>
-                          );
-                        }}
-                        labelLine={false}
-                      >
-                        {statusPie.map((entry, i) => (
-                          <Cell key={entry.name} fill={entry.color} stroke="rgba(226,232,240,0.14)" strokeWidth={1} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "rgba(15, 20, 25, 0.92)",
-                          border: "1px solid rgba(6, 182, 212, 0.35)",
-                          borderRadius: "8px",
-                          fontSize: "12px",
-                          boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
-                        }}
-                        labelStyle={{ color: "rgba(226,232,240,0.9)" }}
-                        itemStyle={{ color: "rgba(226,232,240,0.92)" }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+              <h3 className="font-semibold dash-text-primary mb-4">Status distribution</h3>
+              <div className="min-h-[280px] lg:min-h-[240px] py-1">
+                {statusDistribution.total > 0 && statusDistribution.pieData.length > 0 ? (
+                  <StatusDistributionInfographic
+                    rows={statusDistribution.rows}
+                    pieData={statusDistribution.pieData}
+                    total={statusDistribution.total}
+                    chart={chart}
+                  />
                 ) : (
-                  <div className="flex items-center justify-center h-full text-neutral-500 text-sm">
-                    No data
+                  <div className="flex min-h-[200px] items-center justify-center dash-text-subtle text-sm">
+                    No data in this range
                   </div>
                 )}
               </div>
@@ -1618,29 +1891,29 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ ...transition, delay: reduceMotion ? 0 : 0.2 }}
-            className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"
+            className="dash-panel p-4"
           >
-            <h3 className="text-sm font-semibold text-white mb-4">Needs Review per day (last 14 days)</h3>
+            <h3 className="font-semibold dash-text-primary mb-4">Needs Review per day (last 14 days)</h3>
             <div className="h-44">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={runsPerDay} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="needsReviewBarGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.95} />
-                      <stop offset="70%" stopColor="#f59e0b" stopOpacity={0.65} />
-                      <stop offset="100%" stopColor="#b45309" stopOpacity={0.35} />
+                      <stop offset="0%" stopColor={chart.needsReviewBarStops[0]} stopOpacity={1} />
+                      <stop offset="58%" stopColor={chart.needsReviewBarStops[1]} stopOpacity={0.9} />
+                      <stop offset="100%" stopColor={chart.needsReviewBarStops[2]} stopOpacity={0.45} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="2 6" stroke="rgba(148,163,184,0.18)" vertical={false} />
+                  <CartesianGrid strokeDasharray="2 6" stroke={chart.grid} vertical={false} />
                   <XAxis
                     dataKey="date"
-                    stroke="rgba(148,163,184,0.85)"
+                    stroke={chart.axis}
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                   />
                   <YAxis
-                    stroke="rgba(148,163,184,0.85)"
+                    stroke={chart.axis}
                     fontSize={11}
                     allowDecimals={false}
                     tickLine={false}
@@ -1649,22 +1922,22 @@ export default function Dashboard() {
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "rgba(15, 20, 25, 0.92)",
-                      border: "1px solid rgba(245, 158, 11, 0.35)",
+                      backgroundColor: chart.ttBg,
+                      border: `1px solid ${chart.ttBorderAmber}`,
                       borderRadius: "8px",
                       fontSize: "12px",
-                      boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
+                      boxShadow: chart.ttShadow,
                     }}
-                    labelStyle={{ color: "rgba(226,232,240,0.9)" }}
-                    itemStyle={{ color: "rgba(226,232,240,0.92)" }}
-                    cursor={{ fill: "rgba(245,158,11,0.10)" }}
+                    labelStyle={{ color: chart.ttLabel }}
+                    itemStyle={{ color: chart.ttItem }}
+                    cursor={{ fill: chart.cursorAmber }}
                   />
                   <Bar
                     dataKey="mustReview"
                     name="Needs review"
                     fill="url(#needsReviewBarGrad)"
                     radius={[10, 10, 6, 6]}
-                    stroke="rgba(251,191,36,0.25)"
+                    stroke={chart.barStrokeAmber}
                     strokeWidth={1}
                   />
                 </BarChart>
@@ -1677,13 +1950,13 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ ...transition, delay: reduceMotion ? 0 : 0.25 }}
-            className="rounded-xl border border-neutral-800 bg-neutral-900/50 overflow-hidden"
+            className="dash-panel overflow-hidden"
           >
-            <div className="px-4 py-3 border-b border-neutral-800 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Recent Uploads</h3>
+            <div className="px-4 py-3 border-b border-dash flex items-center justify-between">
+              <h3 className="font-semibold dash-text-primary">Recent Uploads</h3>
               <Link
                 to="/runs"
-                className="text-xs font-medium text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+                className="font-medium flex items-center gap-1"
               >
                 View all
                 <ChevronRight size={14} />
@@ -1724,13 +1997,13 @@ export default function Dashboard() {
                               setSelectedRecentRunId((prev) => (prev === runId ? null : runId));
                             }
                           }}
-                          className={`rounded-lg border bg-neutral-900/80 overflow-hidden text-left cursor-pointer transition-all ${
+                          className={`rounded-lg border overflow-hidden text-left cursor-pointer transition-all bg-[var(--dash-elevated-bg)] ${
                             isSelected
                               ? "border-cyan-500/60 ring-1 ring-cyan-500/40 shadow-[0_0_12px_rgba(34,211,238,0.1)]"
-                              : "border-neutral-800 hover:border-neutral-600"
+                              : "border-dash hover:border-[var(--dash-thumb-border-hover)]"
                           }`}
                         >
-                          <div className="relative h-[72px] sm:h-20 w-full border-b border-neutral-800 overflow-hidden shrink-0 bg-neutral-950">
+                          <div className="relative h-[72px] sm:h-20 w-full border-b border-dash overflow-hidden shrink-0 bg-[var(--dash-thumb-strip-bg)]">
                             <RecentUploadThumbnailSlider
                               runId={runId}
                               urls={urls}
@@ -1741,7 +2014,7 @@ export default function Dashboard() {
                             <div className="flex items-start justify-between gap-1">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-0.5">
-                                  <span className="font-mono text-white text-[10px] truncate" title={runId}>
+                                  <span className="font-Poppins dash-text-primary text-[10px] truncate" title={runId}>
                                     {runId.length > 10 ? `${runId.slice(0, 10)}…` : runId}
                                   </span>
                                   <button
@@ -1750,13 +2023,13 @@ export default function Dashboard() {
                                       e.stopPropagation();
                                       copyRunId(runId);
                                     }}
-                                    className="p-0.5 rounded text-neutral-400 hover:text-white hover:bg-neutral-700 shrink-0"
+                                    className="p-0.5 rounded dash-text-muted hover:text-[var(--dash-heading)] hover:bg-[var(--dash-hover-bg)] shrink-0"
                                     aria-label="Copy run ID"
                                   >
                                     <Copy size={10} />
                                   </button>
                                 </div>
-                                <div className="text-[9px] text-neutral-500 truncate leading-tight">
+                                <div className="text-[9px] truncate leading-tight">
                                   {ts ? new Date(ts).toLocaleString() : "—"}
                                 </div>
                               </div>
@@ -1766,7 +2039,7 @@ export default function Dashboard() {
                                   e.stopPropagation();
                                   setSelectedRecentRunId(runId);
                                 }}
-                                className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 px-1.5 py-0.5 text-[9px] font-semibold hover:bg-cyan-500/30"
+                                className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-cyan-500/20 border border-cyan-500/50 px-1.5 py-0.5 text-[9px] font-semibold hover:bg-cyan-500/30"
                               >
                                 View
                                 <ChevronRight size={9} />
@@ -1791,9 +2064,9 @@ export default function Dashboard() {
                                 {run.status === "completed" && <CheckCircle2 size={9} />}
                                 {run.status.toUpperCase()}
                               </span>
-                              <span className="text-neutral-400">
+                              <span className="dash-text-muted">
                                 Findings:{" "}
-                                <span className="text-neutral-300">
+                                <span className="dash-text-body">
                                   {run.findings_count !== undefined ? run.findings_count : "—"}
                                 </span>
                               </span>
@@ -1801,16 +2074,11 @@ export default function Dashboard() {
                                 className={
                                   (run.must_review_count ?? 0) > 0
                                     ? "text-amber-400 font-medium"
-                                    : "text-neutral-400"
+                                    : "dash-text-muted"
                                 }
                               >
                                 Review: {run.must_review_count ?? "—"}
                               </span>
-                              {pct != null && (
-                                <span className="text-neutral-400">
-                                  Conf: <span className="text-neutral-300">{pct}%</span>
-                                </span>
-                              )}
                             </div>
                           </div>
                         </motion.div>
@@ -1820,13 +2088,13 @@ export default function Dashboard() {
                 </div>
 
                 {selectedRecentRunId && (
-                  <div className="w-full lg:w-1/2 flex flex-col border-t lg:border-t-0 lg:border-l border-neutral-800 lg:pl-4 pt-4 lg:pt-0 min-h-[280px] lg:max-h-[min(70vh,720px)]">
+                  <div className="w-full lg:w-1/2 flex flex-col border-t lg:border-t-0 lg:border-l border-dash lg:pl-4 pt-4 lg:pt-0 min-h-[280px] lg:max-h-[min(70vh,720px)]">
                     <div className="flex items-center justify-between gap-2 mb-3 shrink-0">
                       <div className="min-w-0">
-                        <div className="text-xs text-neutral-500 uppercase tracking-wide">
+                        <div className="text-xs uppercase tracking-wide">
                           Batch images
                         </div>
-                        <div className="font-mono text-sm text-white truncate" title={selectedRecentRunId}>
+                        <div className="font-Poppins text-sm dash-text-primary truncate" title={selectedRecentRunId}>
                           {selectedRecentRunId}
                         </div>
                       </div>
@@ -1837,21 +2105,21 @@ export default function Dashboard() {
                             setBatchDetailTab("image");
                             setRecentBatchDetail({ runId: selectedRecentRunId, fileIndex: 0 });
                           }}
-                          className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/30 text-cyan-100 border border-cyan-400/60 px-2.5 py-1.5 text-xs font-semibold hover:bg-cyan-500/45"
+                          className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/30  border border-cyan-400/60 px-2.5 py-1.5 text-xs font-semibold hover:bg-cyan-500/45"
                         >
                           <Eye size={14} />
                           View details
                         </button>
-                        <Link
+                        {/* <Link
                           to={`/runs/${selectedRecentRunId}`}
-                          className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 px-2.5 py-1.5 text-xs font-semibold hover:bg-cyan-500/30"
+                          className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/20 border border-cyan-500/50 px-2.5 py-1.5 text-xs font-semibold hover:bg-cyan-500/30"
                         >
                           Open run
-                        </Link>
+                        </Link> */}
                         <button
                           type="button"
                           onClick={() => setSelectedRecentRunId(null)}
-                          className="rounded-lg border border-neutral-700 text-neutral-300 px-2.5 py-1.5 text-xs font-semibold hover:bg-neutral-800"
+                          className="rounded-lg border border-dash dash-text-body px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--dash-hover-bg)]"
                         >
                           Close
                         </button>
@@ -1865,7 +2133,7 @@ export default function Dashboard() {
                         const selLoading = sel?.loading ?? true;
                         if (selLoading && selUrls.length === 0) {
                           return (
-                            <div className="flex items-center justify-center py-16 text-neutral-500 text-sm gap-2">
+                            <div className="flex items-center justify-center py-16 dash-text-subtle text-sm gap-2">
                               <Clock className="animate-spin" size={18} />
                               Loading…
                             </div>
@@ -1873,7 +2141,7 @@ export default function Dashboard() {
                         }
                         if (selUrls.length === 0) {
                           return (
-                            <div className="flex flex-col items-center justify-center py-16 text-neutral-500 text-sm gap-2">
+                            <div className="flex flex-col items-center justify-center py-16 dash-text-subtle text-sm gap-2">
                               <ImageIcon size={40} className="opacity-40" />
                               No previews yet for this run
                             </div>
@@ -1903,7 +2171,7 @@ export default function Dashboard() {
                                       framesAnalyzed: f?.frames_analyzed,
                                     })
                                   }
-                                  className="relative aspect-square rounded-lg border border-neutral-700 overflow-hidden bg-neutral-800 hover:border-cyan-500/50 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-colors group"
+                                  className="relative aspect-square rounded-lg border border-dash overflow-hidden bg-[var(--dash-inset-bg)] hover:border-cyan-500/50 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-colors group"
                                 >
                                   <img
                                     src={u}
@@ -1943,7 +2211,7 @@ export default function Dashboard() {
                   <button
                     type="button"
                     onClick={() => setRecentUploadPreview(null)}
-                    className="absolute top-2 right-2 z-20 bg-neutral-800 hover:bg-neutral-700 rounded-full p-2 transition-colors md:top-4 md:right-4"
+                    className="absolute top-2 right-2 z-20 rounded-full p-2 transition-colors md:top-4 md:right-4"
                     aria-label="Close preview"
                   >
                     <X size={20} className="text-white" />
@@ -1956,7 +2224,7 @@ export default function Dashboard() {
                         src={recentUploadPreview.videoUrl}
                         controls
                         playsInline
-                        className="mx-auto w-full max-h-[55vh] rounded-lg border border-neutral-800 bg-black md:max-h-[min(85vh,820px)]"
+                        className="mx-auto w-full max-h-[55vh] rounded-lg border border-[var(--dash-preview-border)] bg-black md:max-h-[min(85vh,820px)]"
                         onClick={(e) => e.stopPropagation()}
                       />
                     ) : (
@@ -1967,7 +2235,7 @@ export default function Dashboard() {
                         onClick={(e) => e.stopPropagation()}
                       />
                     )}
-                    <div className="mt-2 bg-black/70 px-3 py-2 text-xs font-mono text-white md:absolute md:bottom-4 md:left-4 md:mt-0 md:max-w-[min(100%,28rem)] md:rounded-lg">
+                    <div className="mt-2 bg-[var(--dash-inset-bg)] border border-dash px-3 py-2 text-xs font-Poppins dash-text-primary md:absolute md:bottom-4 md:left-4 md:mt-0 md:max-w-[min(100%,28rem)] md:rounded-lg">
                       {recentUploadPreview.filename ?? `${recentUploadPreview.runId.slice(0, 12)}…`}
                     </div>
                   </div>
@@ -1984,7 +2252,7 @@ export default function Dashboard() {
                   )}
                   <button
                     type="button"
-                    className="absolute bottom-2 right-2 z-10 flex items-center gap-2 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-cyan-600 md:bottom-4 md:right-4 md:px-4"
+                    className="absolute bottom-2 right-2 z-10 flex items-center gap-2 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-white transition-colors md:bottom-4 md:right-4 md:px-4"
                     onClick={(e) => {
                       e.stopPropagation();
                       const { runId, filename, imageUrl, videoUrl } = recentUploadPreview;
@@ -2144,18 +2412,18 @@ export default function Dashboard() {
 
                 return (
                   <div
-                    className="fixed inset-0 z-[100] flex items-stretch justify-center bg-black/95 text-white"
+                    className="fixed inset-0 z-[100] flex items-stretch justify-center dash-overlay-backdrop dash-text-primary"
                     onClick={() => setRecentBatchDetail(null)}
                   >
                     <div
-                      className="flex flex-col lg:flex-row w-full max-w-[1700px] h-full max-h-[100dvh] bg-[#0b0d12] border border-neutral-800 overflow-hidden shadow-2xl"
+                      className="flex flex-col lg:flex-row w-full max-w-[1700px] h-full max-h-[100dvh] dash-modal-surface border border-dash overflow-hidden shadow-2xl"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex-1 relative flex flex-col min-w-0 bg-black min-h-[40vh] lg:min-h-0">
                         <button
                           type="button"
                           onClick={() => setRecentBatchDetail(null)}
-                          className="absolute top-3 right-3 z-20 rounded-lg bg-neutral-800/90 hover:bg-neutral-700 p-2 border border-neutral-600"
+                          className="absolute top-3 right-3 z-20 rounded-lg bg-[var(--dash-inset-bg)] hover:bg-[var(--dash-hover-bg)] p-2 border border-dash"
                           aria-label="Close"
                         >
                           <X size={20} />
@@ -2166,7 +2434,7 @@ export default function Dashboard() {
                               <button
                                 type="button"
                                 onClick={() => setIdx(safeIdx - 1)}
-                                className="absolute left-2 top-1/2 -translate-y-1/2 z-10 rounded-full bg-neutral-900/85 hover:bg-neutral-800 p-2.5 border border-neutral-700"
+                                className="absolute left-2 top-1/2 -translate-y-1/2 z-10 rounded-full bg-[var(--dash-panel-bg)] hover:bg-[var(--dash-hover-bg)] p-2.5 border border-dash"
                                 aria-label="Previous file"
                               >
                                 <ChevronLeft size={22} />
@@ -2176,7 +2444,7 @@ export default function Dashboard() {
                               <button
                                 type="button"
                                 onClick={() => setIdx(safeIdx + 1)}
-                                className={`absolute top-1/2 z-10 -translate-y-1/2 rounded-full border border-neutral-700 bg-neutral-900/85 p-2.5 hover:bg-neutral-800 ${
+                                className={`absolute top-1/2 z-10 -translate-y-1/2 rounded-full border border-dash bg-[var(--dash-panel-bg)] p-2.5 hover:bg-[var(--dash-hover-bg)] ${
                                   videoSrc ? "right-2 lg:right-[236px]" : "right-2"
                                 }`}
                                 aria-label="Next file"
@@ -2184,7 +2452,7 @@ export default function Dashboard() {
                                 <ChevronRight size={22} />
                               </button>
                             )}
-                            <div className="absolute top-3 left-3 z-10 rounded-md bg-black/70 px-2 py-1 text-xs font-mono text-neutral-300 border border-neutral-700">
+                            <div className="absolute top-3 left-3 z-10 rounded-md bg-[var(--dash-inset-bg)] px-2 py-1 text-xs font-Poppins dash-text-body border border-dash">
                               {safeIdx + 1}/{n}
                             </div>
                             <div className="flex min-h-0 flex-1 flex-col pb-8 pt-14 lg:flex-row lg:items-stretch">
@@ -2196,16 +2464,16 @@ export default function Dashboard() {
                                     src={videoSrc}
                                     controls
                                     playsInline
-                                    className="max-h-[min(85vh,820px)] max-w-full rounded-lg border border-neutral-800"
+                                    className="max-h-[min(85vh,820px)] max-w-full rounded-lg border border-[var(--dash-preview-border)]"
                                   />
                                 ) : mainImg ? (
                                   <img
                                     src={mainImg}
                                     alt={cur?.filename ?? ""}
-                                    className="max-h-[min(85vh,820px)] max-w-full object-contain rounded-lg border border-neutral-800"
+                                    className="max-h-[min(85vh,820px)] max-w-full object-contain rounded-lg border border-[var(--dash-preview-border)]"
                                   />
                                 ) : (
-                                  <div className="text-neutral-500 text-sm">No preview</div>
+                                  <div className="dash-text-subtle text-sm">No preview</div>
                                 )}
                               </div>
                               {videoSrc && cur && (
@@ -2223,21 +2491,21 @@ export default function Dashboard() {
                           </>
                         )}
                         {n === 0 && (
-                          <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm p-8">
+                          <div className="flex-1 flex items-center justify-center dash-text-subtle text-sm p-8">
                             No files in this batch
                           </div>
                         )}
                       </div>
 
-                      <div className="w-full lg:w-[380px] shrink-0 border-t lg:border-t-0 lg:border-l border-neutral-800 bg-[#0f1419] flex flex-col max-h-[55vh] lg:max-h-[100dvh] overflow-hidden">
-                        <div className="flex border-b border-neutral-800 shrink-0">
+                      <div className="w-full lg:w-[380px] shrink-0 border-t lg:border-t-0 lg:border-l border-dash dash-modal-aside flex flex-col max-h-[55vh] lg:max-h-[100dvh] overflow-hidden">
+                        <div className="flex border-b border-dash shrink-0">
                           <button
                             type="button"
                             onClick={() => setBatchDetailTab("image")}
                             className={`flex-1 py-3 text-xs font-bold tracking-wide ${
                               batchDetailTab === "image"
                                 ? "text-cyan-300 border-b-2 border-cyan-400 bg-cyan-500/10"
-                                : "text-neutral-500 hover:text-neutral-300"
+                                : "dash-text-subtle hover:text-[var(--dash-body)]"
                             }`}
                           >
                             {isVideoJob ? "MEDIA" : "IMAGE"}
@@ -2248,7 +2516,7 @@ export default function Dashboard() {
                             className={`flex-1 py-3 text-xs font-bold tracking-wide ${
                               batchDetailTab === "processing"
                                 ? "text-cyan-300 border-b-2 border-cyan-400 bg-cyan-500/10"
-                                : "text-neutral-500 hover:text-neutral-300"
+                                : "dash-text-subtle hover:text-[var(--dash-body)]"
                             }`}
                           >
                             PROCESSING
@@ -2259,32 +2527,32 @@ export default function Dashboard() {
                           {batchDetailTab === "image" ? (
                             <div className="p-4 space-y-4">
                               <div>
-                                <div className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">
+                                <div className="text-[10px] uppercase tracking-wider dash-text-subtle mb-1">
                                   ID
                                 </div>
-                                <div className="font-mono text-sm text-white break-all">{runId}</div>
-                                <div className="text-xs text-neutral-400 mt-1">{shortAgo(created)}</div>
+                                <div className="font-Poppins text-sm dash-text-primary break-all">{runId}</div>
+                                <div className="text-xs dash-text-muted mt-1">{shortAgo(created)}</div>
                               </div>
 
                               <div className="grid grid-cols-2 gap-2 text-center">
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-2">
-                                  <div className="text-[10px] text-neutral-500 uppercase">Total files</div>
-                                  <div className="text-lg font-semibold text-white">{totalFiles}</div>
+                                <div className="dash-nested p-2">
+                                  <div className="text-[10px] dash-text-subtle uppercase">Total files</div>
+                                  <div className="text-lg font-semibold dash-text-primary">{totalFiles}</div>
                                 </div>
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-2">
-                                  <div className="text-[10px] text-neutral-500 uppercase">Completed</div>
+                                <div className="dash-nested p-2">
+                                  <div className="text-[10px] dash-text-subtle uppercase">Completed</div>
                                   <div className="text-lg font-semibold text-emerald-400">{completed}</div>
                                 </div>
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-2">
-                                  <div className="text-[10px] text-neutral-500 uppercase">Defects found</div>
+                                <div className="dash-nested p-2">
+                                  <div className="text-[10px] dash-text-subtle uppercase">Defects found</div>
                                   <div className="text-lg font-semibold text-red-400">{defectsFound}</div>
                                 </div>
                                 
                               </div>
 
                               {cur && (
-                                <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3 space-y-1.5">
-                                  <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase text-neutral-500">
+                                <div className="dash-nested dash-nested-mid border p-3 space-y-1.5">
+                                  <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase dash-text-subtle">
                                     <span>Filename</span>
                                     {cur.source === "thermal" && (
                                       <span className="normal-case rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 text-[9px] font-semibold">
@@ -2297,8 +2565,8 @@ export default function Dashboard() {
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-xs text-white font-medium break-all">{cur.filename}</div>
-                                  <div className="flex flex-wrap gap-3 text-[11px] text-neutral-400 pt-1">
+                                  <div className="text-xs dash-text-primary font-medium break-all">{cur.filename}</div>
+                                  <div className="flex flex-wrap gap-3 text-[11px] dash-text-muted pt-1">
                                     <span>
                                       Defects:{" "}
                                       <span className="text-emerald-400 font-semibold">{curDefects}</span>
@@ -2307,7 +2575,7 @@ export default function Dashboard() {
                                     {procMs != null && (
                                       <span>
                                         Time:{" "}
-                                        <span className="text-neutral-200">{Math.round(procMs)}ms</span>
+                                        <span className="text-[var(--dash-body)]">{Math.round(procMs)}ms</span>
                                       </span>
                                     )}
                                   </div>
@@ -2315,7 +2583,7 @@ export default function Dashboard() {
                               )}
 
                               <div>
-                                <div className="text-xs font-semibold text-white mb-2">
+                                <div className="text-xs font-semibold dash-text-primary mb-2">
                                   All Files ({n})
                                 </div>
                                 <div className="flex flex-col gap-1.5 max-h-[200px] overflow-y-auto pr-1">
@@ -2331,14 +2599,14 @@ export default function Dashboard() {
                                         className={`flex items-center gap-2 rounded-lg border p-2 text-left transition-colors ${
                                           sel
                                             ? "border-cyan-500/70 bg-cyan-500/10 ring-1 ring-cyan-500/30"
-                                            : "border-neutral-800 bg-neutral-900/30 hover:border-neutral-600"
+                                            : "border-dash bg-[var(--dash-nested-bg-soft)] hover:border-[var(--dash-thumb-border-hover)]"
                                         }`}
                                       >
-                                        <div className="relative w-11 h-11 shrink-0 rounded overflow-hidden bg-neutral-800">
+                                        <div className="relative w-11 h-11 shrink-0 rounded overflow-hidden bg-[var(--dash-inset-bg)]">
                                           {thumb ? (
                                             <img src={thumb} alt="" className="w-full h-full object-cover" />
                                           ) : (
-                                            <ImageIcon className="w-5 h-5 text-neutral-600 m-auto" />
+                                            <ImageIcon className="w-5 h-5 text-[var(--dash-subtle)] m-auto" />
                                           )}
                                           {isMp4Url(f.video_url ?? undefined) && (
                                             <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
@@ -2352,7 +2620,7 @@ export default function Dashboard() {
                                           )}
                                         </div>
                                         <div className="min-w-0 flex-1">
-                                          <div className="text-[10px] text-white truncate" title={f.filename}>
+                                          <div className="text-[10px] dash-text-primary truncate" title={f.filename}>
                                             {f.filename}
                                           </div>
                                           <div className="flex flex-wrap items-center gap-1.5">
@@ -2374,7 +2642,7 @@ export default function Dashboard() {
 
                               {dets.length > 0 && (
                                 <div>
-                                  <div className="text-xs font-semibold text-white mb-2">
+                                  <div className="text-xs font-semibold dash-text-primary mb-2">
                                     Detections ({dets.length})
                                   </div>
                                   <div className="space-y-2">
@@ -2382,10 +2650,10 @@ export default function Dashboard() {
                                       return (
                                         <div
                                           key={di}
-                                          className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-2.5"
+                                          className="dash-nested dash-nested-mid border p-2.5"
                                         >
                                           <div className="flex items-center justify-between gap-2">
-                                            <span className="text-[11px] text-white font-medium truncate">
+                                            <span className="text-[11px] dash-text-primary font-medium truncate">
                                               {formatDetectionLabel(det.class_name)}
                                             </span>
                                           </div>
@@ -2397,23 +2665,23 @@ export default function Dashboard() {
                               )}
                             </div>
                           ) : (
-                            <div className="p-4 space-y-3 text-sm text-neutral-300">
-                              <div className="text-xs font-semibold text-white uppercase tracking-wide">
+                            <div className="p-4 space-y-3 text-sm dash-text-body">
+                              <div className="text-xs font-semibold dash-text-primary uppercase tracking-wide">
                                 Batch processing
                               </div>
-                              <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3 space-y-2 text-xs">
+                              <div className="dash-nested dash-nested-mid border p-3 space-y-2 text-xs">
                                 <div className="flex justify-between">
-                                  <span className="text-neutral-500">Status</span>
-                                  <span className="text-white font-medium">
+                                  <span className="dash-text-subtle">Status</span>
+                                  <span className="dash-text-primary font-medium">
                                     {(run?.status ?? "—").toString().toUpperCase()}
                                   </span>
                                 </div>
                                 <div className="flex justify-between">
-                                  <span className="text-neutral-500">Job type</span>
-                                  <span className="text-white">{isVideoJob ? "Video" : "Image"}</span>
+                                  <span className="dash-text-subtle">Job type</span>
+                                  <span className="dash-text-primary">{isVideoJob ? "Video" : "Image"}</span>
                                 </div>
                                 <div className="flex justify-between">
-                                  <span className="text-neutral-500">Files completed</span>
+                                  <span className="dash-text-subtle">Files completed</span>
                                   <span className="text-emerald-400">
                                     {completed} / {totalFiles}
                                   </span>
@@ -2421,26 +2689,26 @@ export default function Dashboard() {
                                 {isVideoJob && cur && (
                                   <>
                                     <div className="flex justify-between">
-                                      <span className="text-neutral-500">Duration</span>
-                                      <span className="text-white">{cur.duration ?? "—"}s</span>
+                                      <span className="dash-text-subtle">Duration</span>
+                                      <span className="dash-text-primary">{cur.duration ?? "—"}s</span>
                                     </div>
                                     <div className="flex justify-between">
-                                      <span className="text-neutral-500">FPS / Frames</span>
-                                      <span className="text-white">
+                                      <span className="dash-text-subtle">FPS / Frames</span>
+                                      <span className="dash-text-primary">
                                         {cur.fps ?? "—"} / {cur.frames_analyzed ?? "—"}
                                       </span>
                                     </div>
                                   </>
                                 )}
                               </div>
-                              <div className="text-[11px] text-neutral-500 leading-relaxed">
+                              <div className="text-[11px] dash-text-subtle leading-relaxed">
                                 Per-file timings and pipeline stages appear here for traceability.
                               </div>
                             </div>
                           )}
                         </div>
 
-                        <div className="shrink-0 border-t border-neutral-800 p-3">
+                        <div className="shrink-0 border-t border-dash p-3">
                           <Link
                             to={`/runs/${runId}`}
                             className="flex items-center justify-center gap-2 w-full rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 py-2 text-xs font-semibold hover:bg-cyan-500/30"

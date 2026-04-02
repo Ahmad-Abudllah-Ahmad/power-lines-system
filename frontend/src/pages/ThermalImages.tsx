@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { toast } from "../components/Toast";
 import MediaUploadBox from "../components/MediaUploadBox";
+import UploadPipelineStrip from "../components/UploadPipelineStrip";
 import {
   ThermalAnalysisDetailModal,
   ThermalAnalysisConfigurationInteractive,
@@ -667,7 +668,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={transition}
-            className="glass w-full min-w-0 flex-1 rounded-2xl border border-neutral-800 p-6 shadow-premium"
+            className="glass w-full min-w-0 flex-1 rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium"
           >
             <div className="mb-2 flex flex-wrap items-center gap-3">
               <Thermometer className="text-emerald-400" size={22} />
@@ -685,9 +686,9 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                 </span>
               )}
             </div>
-            <h1 className="mb-2 text-2xl font-bold text-white">DJI R-JPEG Thermal Processing</h1>
-            <p className="text-sm leading-relaxed text-neutral-300">
-              Upload DJI R-JPEG thermal images for batch analysis. Temperature mapping, metadata extraction,
+            <h1 className="mb-2 text-2xl font-bold dash-text-primary">DJI R-JPEG Thermal Processing</h1>
+            <p className="text-sm leading-relaxed dash-text-body">
+              Upload DJI R-JPEG Individual or bulk thermal images for batch analysis. Temperature mapping, metadata extraction,
               environmental data, and correction insights — processed in queue.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
@@ -695,7 +696,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                 <button
                   type="button"
                   onClick={clearAll}
-                  className="flex items-center gap-2 rounded-xl border border-neutral-700 glass px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-premium-card-hover"
+                  className="flex items-center gap-2 rounded-xl border border-[var(--dash-panel-border)] glass px-4 py-2 text-sm font-semibold dash-text-primary transition-colors hover:bg-premium-card-hover"
                 >
                   <Trash2 size={16} /> Clear All
                 </button>
@@ -722,7 +723,6 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ ...transition, delay: reduceMotion ? 0 : 0.05 }}
-            className="glass w-full shrink-0 rounded-2xl border border-neutral-800 bg-premium-card/20 p-5 shadow-premium xl:max-w-md"
           >
             <ThermalAnalysisConfigurationInteractive
               objectType={objectType}
@@ -734,6 +734,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
               processing={processing}
               hideEmissivityPaletteSection={embedded}
               hideTemperatureUnitSection={embedded}
+              hideProcessingPipelineSection
             />
           </motion.div>
         </div>
@@ -742,12 +743,12 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={transition}
-          className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium"
+          className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium"
         >
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1">
               <div className="mb-2 flex flex-wrap items-center gap-3">
-                <Link to="/dashboard" className="text-neutral-400 hover:text-white transition-colors">
+                <Link to="/dashboard" className="dash-text-muted hover:dash-text-primary transition-colors">
                   <ArrowLeft size={20} />
                 </Link>
                 <Thermometer className="text-emerald-400" size={22} />
@@ -765,8 +766,8 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                   </span>
                 )}
               </div>
-              <h1 className="mb-2 text-2xl font-bold text-white">DJI R-JPEG Thermal Processing</h1>
-              <p className="text-sm leading-relaxed text-neutral-300">
+              <h1 className="mb-2 text-2xl font-bold dash-text-primary">DJI R-JPEG Thermal Processing</h1>
+              <p className="text-sm leading-relaxed dash-text-body">
                 Upload DJI R-JPEG thermal images for batch analysis. Temperature mapping, metadata extraction,
                 environmental data, and correction insights — processed in queue.
               </p>
@@ -775,7 +776,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                   <button
                     type="button"
                     onClick={clearAll}
-                    className="flex items-center gap-2 rounded-xl border border-neutral-700 glass px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-premium-card-hover"
+                    className="flex items-center gap-2 rounded-xl border border-[var(--dash-panel-border)] glass px-4 py-2 text-sm font-semibold dash-text-primary transition-colors hover:bg-premium-card-hover"
                   >
                     <Trash2 size={16} /> Clear All
                   </button>
@@ -798,7 +799,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                 </button>
               </div>
             </div>
-            <div className="w-full shrink-0 rounded-xl border border-neutral-800 bg-premium-card/20 p-5 xl:max-w-md">
+            <div className="w-full shrink-0 rounded-xl border border-[var(--dash-panel-border)] bg-premium-card/20 p-5 xl:max-w-md">
               <ThermalAnalysisConfigurationInteractive
                 objectType={objectType}
                 onObjectTypeChange={setObjectType}
@@ -809,22 +810,35 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                 processing={processing}
                 hideEmissivityPaletteSection={false}
                 hideTemperatureUnitSection={false}
+                hideProcessingPipelineSection
               />
             </div>
           </div>
         </motion.div>
       )}
 
+      <UploadPipelineStrip
+        variant="emerald"
+        title="DJI R-JPEG thermal pipeline"
+        steps={[
+          "DJI SDK initialization",
+          "EXIF/XMP metadata extraction",
+          "Temperature map generation",
+          "Pseudo-color visualization",
+          "Environmental analysis",
+        ]}
+      />
+
       <div className="grid grid-cols-1 gap-6">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...transition, delay: reduceMotion ? 0 : 0.05 }}
-          className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium"
+          className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium"
         >
           <div className="mb-4 flex items-center gap-2">
             <Upload className="text-emerald-400" size={20} />
-            <h2 className="text-lg font-semibold text-white">Image Upload</h2>
+            <h2 className="text-lg font-semibold dash-text-primary">Image Upload</h2>
           </div>
 
           <MediaUploadBox
@@ -864,7 +878,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
               if (e.target.files?.length) addFiles(Array.from(e.target.files));
               e.target.value = "";
             }}
-            emptyIcon={<Thermometer className="mx-auto text-3xl text-neutral-500" size={36} />}
+            emptyIcon={<Thermometer className="mx-auto text-3xl dash-text-subtle" size={36} />}
             emptyDescription="Drop thermal images here or click to browse"
             primaryButtonLabel="Select Thermal Images"
             footerNote="DJI R-JPEG radiometric thermal images for temperature analysis"
@@ -879,7 +893,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                   <img
                     src={f.preview}
                     alt={f.file.name}
-                    className="h-16 w-16 rounded-lg border border-neutral-700 object-cover"
+                    className="h-16 w-16 rounded-lg border border-[var(--dash-panel-border)] object-cover"
                   />
                   {!processing && (
                     <button
@@ -896,9 +910,9 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
           </MediaUploadBox>
 
           {totalFiles > 0 && !processing && (
-            <div className="mt-3 rounded-xl border border-neutral-700 bg-premium-card/50 p-3">
+            <div className="mt-3 rounded-xl border border-[var(--dash-panel-border)] bg-premium-card/50 p-3">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-medium text-white">
+                <div className="text-sm font-medium dash-text-primary">
                   {totalFiles} file{totalFiles !== 1 ? "s" : ""} ready
                 </div>
                 <span className="text-xs text-emerald-400">{totalFiles} Thermal</span>
@@ -913,15 +927,15 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Clock className="animate-spin text-emerald-400" size={18} />
-              <span className="font-semibold text-white">Processing Thermal Images</span>
+              <span className="font-semibold dash-text-primary">Processing Thermal Images</span>
             </div>
-            <span className="text-sm text-neutral-300">
+            <span className="text-sm dash-text-body">
               {batchProgress.total > 0
                 ? `${Math.round((batchProgress.completed / batchProgress.total) * 100)}%`
                 : "—"}
             </span>
           </div>
-          <div className="h-2.5 w-full overflow-hidden rounded-full bg-neutral-800">
+          <div className="h-2.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
             {batchProgress.total > 0 ? (
               <div
                 className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-300"
@@ -931,7 +945,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
               <div className="animate-progress-indeterminate h-full w-1/3 rounded-full bg-gradient-to-r from-transparent via-emerald-500/70 to-transparent" />
             )}
           </div>
-          <div className="mt-2 text-xs text-neutral-400">
+          <div className="mt-2 text-xs dash-text-muted">
             {batchProgress.total > 0
               ? `${batchProgress.completed} of ${batchProgress.total} files completed`
               : "Uploading files..."}
@@ -942,11 +956,11 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
       {cards.size > 0 && (
         <div>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
+            <h2 className="flex items-center gap-2 text-lg font-semibold dash-text-primary">
               <Layers className="text-emerald-400" size={20} />
               Analysis Results ({cards.size})
             </h2>
-            <div className="flex gap-3 text-xs text-neutral-400">
+            <div className="flex gap-3 text-xs dash-text-muted">
               {(() => {
                 const completed = Array.from(cards.values()).filter(c => c.status === "complete").length;
                 const errors = Array.from(cards.values()).filter(c => c.status === "error").length;
@@ -977,10 +991,10 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                     ? "border-red-500/30 bg-red-500/5"
                     : card.status === "processing"
                     ? "border-emerald-500/50 bg-emerald-500/5"
-                    : "border-neutral-800 bg-premium-card/30"
+                    : "border-[var(--dash-panel-border)] bg-premium-card/30"
                 }`}
               >
-                <div className="relative aspect-square overflow-hidden bg-neutral-800">
+                <div className="relative aspect-square overflow-hidden" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
                   {card.status === "complete" && card.thermalImageB64 ? (
                     <img
                       src={`data:image/png;base64,${card.thermalImageB64}`}
@@ -1053,7 +1067,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                       {card.status === "processing" ? (
                         <Clock className="animate-spin text-emerald-400" size={24} />
                       ) : (
-                        <Clock className="text-neutral-400" size={24} />
+                        <Clock className="dash-text-muted" size={24} />
                       )}
                       <span className="px-2 text-center text-[10px] font-medium text-white">
                         {card.progressLabel}
@@ -1082,12 +1096,12 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
                 </div>
 
                 <div className="p-2">
-                  <p className="truncate text-[11px] font-medium text-white" title={card.filename}>
+                  <p className="truncate text-[11px] font-medium dash-text-primary" title={card.filename}>
                     {card.filename}
                   </p>
 
                   {card.status === "complete" && card.stats && (
-                    <div className="mt-1 text-[10px] text-neutral-400">
+                    <div className="mt-1 text-[10px] dash-text-muted">
                       {(() => {
                         const displayUnit = (card.unit as ThermalTempUnit) || unit;
                         const uu = unitLabel(displayUnit);

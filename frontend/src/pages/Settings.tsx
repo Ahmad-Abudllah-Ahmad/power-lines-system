@@ -35,31 +35,31 @@ export default function Settings() {
       className="space-y-6"
     >
       <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Settings</h1>
-        <p className="text-neutral-400">
+        <h1 className="text-3xl font-bold dash-text-primary mb-2">Settings</h1>
+        <p className="dash-text-muted">
           API configuration, health status, and data export.
         </p>
       </div>
 
       {/* API & Health */}
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 backdrop-blur-sm space-y-4">
+      <div className="dash-panel rounded-2xl p-6 backdrop-blur-sm space-y-4">
         <div className="flex items-center gap-2 mb-4">
           <Server className="text-cyan-400" size={22} />
-          <h2 className="text-lg font-semibold text-white">API & Health</h2>
+          <h2 className="text-lg font-semibold dash-text-primary">API & Health</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="rounded-xl border border-neutral-700 bg-neutral-800/50 p-4">
-            <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-2">API base URL</div>
-            <div className="font-mono text-sm text-white break-all">{apiBase}</div>
-            <div className="flex items-start gap-2 mt-2 text-xs text-neutral-400">
+          <div className="dash-nested rounded-xl p-4">
+            <div className="text-xs font-medium dash-text-muted uppercase tracking-wider mb-2">API base URL</div>
+            <div className="font-Poppins text-sm dash-text-primary break-all">{apiBase}</div>
+            <div className="flex items-start gap-2 mt-2 text-xs dash-text-muted">
               <Info size={14} className="shrink-0 mt-0.5" />
               <span>Set VITE_API_BASE in .env (default: http://localhost:8080). Restart dev server after change.</span>
             </div>
           </div>
-          <div className="rounded-xl border border-neutral-700 bg-neutral-800/50 p-4">
-            <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-2">Health status</div>
+          <div className="dash-nested rounded-xl p-4">
+            <div className="text-xs font-medium dash-text-muted uppercase tracking-wider mb-2">Health status</div>
             {health === null ? (
-              <div className="text-sm text-neutral-400">Checking...</div>
+              <div className="text-sm dash-text-muted">Checking...</div>
             ) : (
               <div
                 className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium ${
@@ -93,21 +93,21 @@ export default function Settings() {
       </div>
 
       {/* Preferences */}
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 backdrop-blur-sm space-y-4">
+      <div className="dash-panel rounded-2xl p-6 backdrop-blur-sm space-y-4">
         <div className="flex items-center gap-2 mb-4">
           <SettingsIcon className="text-cyan-400" size={22} />
-          <h2 className="text-lg font-semibold text-white">Preferences</h2>
+          <h2 className="text-lg font-semibold dash-text-primary">Preferences</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="rounded-xl border border-neutral-700 bg-neutral-800/50 p-4">
-            <div className="text-sm font-semibold text-white">Security</div>
-            <div className="mt-2 text-sm text-neutral-300">
+          <div className="dash-nested rounded-xl p-4">
+            <div className="text-sm font-semibold dash-text-primary">Security</div>
+            <div className="mt-2 text-sm dash-text-body">
               <span className="text-cyan-400">Zero-Exfiltration:</span> images and inference outputs can run on an offline workstation (air-gapped option).
             </div>
           </div>
-          <div className="rounded-xl border border-neutral-700 bg-neutral-800/50 p-4">
-            <div className="text-sm font-semibold text-white">Model versions</div>
-            <div className="mt-2 text-sm text-neutral-400">
+          <div className="dash-nested rounded-xl p-4">
+            <div className="text-sm font-semibold dash-text-primary">Model versions</div>
+            <div className="mt-2 text-sm dash-text-muted">
               Shown in run detail metadata when available. Backend supplies pipeline/model info per run.
             </div>
           </div>

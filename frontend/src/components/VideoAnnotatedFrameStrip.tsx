@@ -151,10 +151,11 @@ export function VideoAnnotatedFrameStrip({
         className="pointer-events-none fixed left-0 top-0 h-px w-px opacity-0"
       />
       <div
-        className="flex h-full min-h-0 w-[220px] shrink-0 flex-col border-l border-neutral-800 bg-[#0a0d10]"
+        className="flex h-full min-h-0 w-[220px] shrink-0 flex-col border-l"
+        style={{ borderColor: "var(--dash-panel-border)", backgroundColor: "var(--dash-thumb-strip-bg)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="shrink-0 border-b border-neutral-800 px-2 py-2 text-[11px] font-medium text-neutral-400">
+        <div className="shrink-0 border-b px-2 py-2 text-[11px] font-medium" style={{ borderColor: "var(--dash-panel-border)", color: "var(--dash-muted)" }}>
           Annotated frames
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
@@ -163,7 +164,8 @@ export function VideoAnnotatedFrameStrip({
               <button
                 key={slot.k}
                 type="button"
-                className="group overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-left transition-colors hover:border-cyan-500/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50"
+                className="group overflow-hidden rounded-lg border text-left transition-colors hover:border-cyan-500/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50"
+                style={{ borderColor: "var(--dash-panel-border)", backgroundColor: "var(--dash-nested-bg)" }}
                 onClick={(e) => {
                   e.stopPropagation();
                   const v = mainVideoRef.current;
@@ -172,7 +174,7 @@ export function VideoAnnotatedFrameStrip({
                   v.currentTime = slot.t;
                 }}
               >
-                <div className="aspect-video bg-neutral-800">
+                <div className="aspect-video" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
                   {thumbs[String(slot.k)] ? (
                     <img
                       src={thumbs[String(slot.k)]}
@@ -181,10 +183,10 @@ export function VideoAnnotatedFrameStrip({
                       draggable={false}
                     />
                   ) : (
-                    <div className="h-full w-full animate-pulse bg-neutral-800" />
+                    <div className="h-full w-full animate-pulse" style={{ backgroundColor: "var(--dash-skeleton)" }} />
                   )}
                 </div>
-                <div className="px-1 py-1 text-center font-mono text-[10px] text-neutral-300 group-hover:text-white">
+                <div className="px-1 py-1 text-center font-Poppins text-[10px] dash-text-body group-hover:dash-text-primary">
                   {formatTimeSec(slot.t)}
                 </div>
               </button>

@@ -1,10 +1,5 @@
 import React, { useEffect, useState } from "react";
-import {
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
-  User,
-} from "lucide-react";
+import { Moon, Sun, User } from "lucide-react";
 import {
   IconLayoutDashboard,
   IconTarget,
@@ -14,7 +9,7 @@ import {
   IconSettings,
 } from "@tabler/icons-react";
 import { ToastContainer, useToast } from "./Toast";
-import { checkApiHealth } from "../api/api";
+import { ThemeProvider, type Theme } from "../context/ThemeContext";
 import { FloatingDock, type FloatingDockItem } from "./ui/floating-dock";
 
 const dockItems: FloatingDockItem[] = [
@@ -51,35 +46,40 @@ const dockItems: FloatingDockItem[] = [
   },
 ];
 
+function readStoredTheme(): Theme {
+  if (typeof window === "undefined") return "dark";
+  const stored = localStorage.getItem("theme");
+  return stored === "light" || stored === "dark" ? stored : "dark";
+}
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { toasts, remove } = useToast();
-  const [apiHealth, setApiHealth] = useState<{ healthy: boolean; latency?: number }>({
-    healthy: false,
-  });
+  const [theme, setTheme] = useState<Theme>(readStoredTheme);
 
   useEffect(() => {
-    const run = async () => {
-      const h = await checkApiHealth();
-      setApiHealth(h);
-    };
-    run();
-    const id = setInterval(run, 30000);
-    return () => clearInterval(id);
-  }, []);
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
-  const statusColor =
-    apiHealth.healthy
-      ? apiHealth.latency != null && apiHealth.latency > 2000
-        ? { bg: "bg-amber-500/10", border: "border-amber-500/40", text: "text-amber-400", dot: "bg-amber-400" }
-        : { bg: "bg-emerald-500/10", border: "border-emerald-500/40", text: "text-emerald-400", dot: "bg-emerald-400" }
-      : { bg: "bg-red-500/10", border: "border-red-500/40", text: "text-red-400", dot: "bg-red-500" };
+  const logoSrc =
+    theme === "light" ? encodeURI("/logo-1.png") : "/logo-2.png";
 
   return (
-    <div className="min-h-screen bg-[#0a0e1a] text-white relative overflow-x-hidden">
+    <ThemeProvider value={{ theme, setTheme }}>
+    <div
+      className="min-h-screen relative overflow-x-hidden transition-[background-color,color] duration-200"
+      style={{ backgroundColor: "var(--layout-bg)", color: "var(--layout-text)" }}
+    >
       <ToastContainer toasts={toasts} onRemove={remove} />
 
       {/* ── Header ── */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-20 flex items-center justify-between px-5 md:px-8 bg-[#0d1117]/95 border-b border-white/[0.06] backdrop-blur-md">
+      <header
+        className="fixed top-0 left-0 right-0 z-50 h-20 flex items-center justify-between px-5 md:px-8 backdrop-blur-md border-b transition-[background-color,border-color] duration-200"
+        style={{
+          backgroundColor: "var(--header-bg)",
+          borderBottomColor: "var(--header-border)",
+        }}
+      >
 
         {/* Left — Logo */}
         <div className="flex items-center h-full py-3">
@@ -92,47 +92,99 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           */}
           <div className="flex items-center justify-center w-[200px] md:w-[240px] h-full px-4">
             <img
-              src="/azerenerji-logo.png"
+              src={logoSrc}
               alt="AzərEnerji"
-              style={{ width: "620px", height: "144px", objectFit: "contain", transform: "scale(1.3)", transformOrigin: "left" }}
-              className="w-full h-full object-contain scale-125"
+              style={{
+                width: "620px",
+                height: "144px",
+                objectFit: "contain",
+                transform: theme === "light" ? "scale(1.3)" : "scale(1.3)",
+                transformOrigin: "left",
+              }}
+              className={theme === "light" ? "w-full h-full object-contain" : "w-full h-full object-contain"}
             />
           </div>
         </div>
 
-        {/* Right — Status + User */}
+        {/* Right — Theme + User */}
         <div className="flex items-center gap-3">
 
-          {/* API health pill */}
+          {/* Theme: segmented toggle (Lucide Sun / Moon) */}
           <div
-            className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-all
-              ${statusColor.bg} ${statusColor.border} ${statusColor.text}`}
-            title={
-              apiHealth.healthy
-                ? `API OK${apiHealth.latency != null ? ` · ${apiHealth.latency}ms` : ""}`
-                : "API offline"
-            }
+            className="inline-flex h-9 shrink-0 items-center rounded-full border p-1 gap-0.5"
+            style={{
+              backgroundColor: "var(--theme-toggle-bg)",
+              borderColor: "var(--theme-toggle-border)",
+            }}
+            role="group"
+            aria-label="Color theme"
           >
-            {/* Animated dot instead of icon — cleaner at small sizes */}
-            <span className={`w-1.5 h-1.5 rounded-full ${statusColor.dot} ${apiHealth.healthy ? "animate-pulse" : ""}`} />
-            <span>
-              {apiHealth.healthy
-                ? apiHealth.latency != null && apiHealth.latency > 2000
-                  ? `Slow · ${apiHealth.latency}ms`
-                  : "Online"
-                : "Offline"}
-            </span>
+            <button
+              type="button"
+              onClick={() => setTheme("light")}
+              aria-pressed={theme === "light"}
+              aria-label="Light theme"
+              title="Light theme"
+              className={`flex size-7 items-center justify-center rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--layout-bg)] ${
+                theme === "dark" ? "opacity-60 hover:opacity-100" : ""
+              }`}
+              style={
+                theme === "light"
+                  ? {
+                      backgroundColor: "var(--theme-segment-active-bg)",
+                      color: "var(--theme-segment-active-fg)",
+                      boxShadow: "var(--theme-segment-active-shadow)",
+                    }
+                  : { color: "var(--theme-segment-muted)" }
+              }
+            >
+              <Sun className="size-4" strokeWidth={2} aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme("dark")}
+              aria-pressed={theme === "dark"}
+              aria-label="Dark theme"
+              title="Dark theme"
+              className={`flex size-7 items-center justify-center rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--layout-bg)] ${
+                theme === "light" ? "opacity-60 hover:opacity-100" : ""
+              }`}
+              style={
+                theme === "dark"
+                  ? {
+                      backgroundColor: "var(--theme-segment-active-bg)",
+                      color: "var(--theme-segment-active-fg)",
+                      boxShadow: "var(--theme-segment-active-shadow)",
+                    }
+                  : { color: "var(--theme-segment-muted)" }
+              }
+            >
+              <Moon className="size-4" strokeWidth={2} aria-hidden />
+            </button>
           </div>
 
           {/* Divider */}
-          <div className="hidden sm:block w-px h-5 bg-white/10" />
+          <div
+            className="hidden sm:block w-px h-5 transition-colors duration-200"
+            style={{ backgroundColor: "var(--divider)" }}
+          />
 
           {/* User chip */}
           <div className="hidden sm:flex items-center gap-2.5 cursor-pointer group">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-neutral-700 to-neutral-800 border border-white/10 flex items-center justify-center text-neutral-400 group-hover:border-white/20 transition-colors">
+            <div
+              className="w-8 h-8 rounded-full border flex items-center justify-center transition-colors group-hover:[border-color:var(--user-chip-border-hover)]"
+              style={{
+                background: `linear-gradient(to bottom right, var(--user-chip-from), var(--user-chip-to))`,
+                borderColor: "var(--user-chip-border)",
+                color: "var(--user-chip-icon)",
+              }}
+            >
               <User size={15} />
             </div>
-            <span className="text-sm text-neutral-400 group-hover:text-neutral-300 transition-colors max-w-[96px] truncate">
+            <span
+              className="text-sm max-w-[96px] truncate transition-colors group-hover:[color:var(--user-text-hover)]"
+              style={{ color: "var(--user-text)" }}
+            >
               User
             </span>
           </div>
@@ -145,5 +197,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="p-4 md:p-6 max-w-[1600px] mx-auto">{children}</div>
       </main>
     </div>
+    </ThemeProvider>
   );
 }

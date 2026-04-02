@@ -6,17 +6,17 @@ const accentRing = {
   cyan: {
     active: "border-premium-accent bg-premium-accent/10",
     filled: "border-premium-success/50 bg-premium-success/5",
-    idle: "border-neutral-700 bg-premium-card/30 hover:border-premium-accent/50",
+    idle: "border-neutral-700 hover:border-premium-accent/50",
   },
   emerald: {
     active: "border-emerald-400 bg-emerald-400/10",
     filled: "border-emerald-500/40 bg-emerald-500/5",
-    idle: "border-neutral-700 bg-premium-card/30 hover:border-emerald-400/40",
+    idle: "border-neutral-700 hover:border-emerald-400/40",
   },
   purple: {
     active: "border-purple-400 bg-purple-400/10",
     filled: "border-purple-500/40 bg-purple-500/5",
-    idle: "border-neutral-700 bg-premium-card/30 hover:border-purple-400/50",
+    idle: "border-neutral-700 hover:border-purple-400/50",
   },
 } as const;
 
@@ -110,7 +110,7 @@ export default function MediaUploadBox({
         ) : (
           <div className="text-center py-4">
             <div className="flex justify-center mb-2">{emptyIcon}</div>
-            <div className="text-sm text-neutral-300 mb-2">{emptyDescription}</div>
+            <div className="text-sm mb-2">{emptyDescription}</div>
             <input
               type="file"
               accept={accept}

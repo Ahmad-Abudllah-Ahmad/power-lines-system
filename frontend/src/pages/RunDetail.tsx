@@ -359,7 +359,7 @@ export default function RunDetail() {
       case "LOW":
         return "text-green-400 bg-green-500/20 border-green-500/50";
       default:
-        return "text-neutral-400 bg-neutral-500/20 border-neutral-500/50";
+        return "dash-text-muted bg-[var(--dash-nested-bg-soft)] border-[var(--dash-panel-border)]";
     }
   };
 
@@ -462,9 +462,9 @@ export default function RunDetail() {
             <ArrowLeft className="text-sm" />
             Back to Runs
           </Link>
-          <h1 className="text-3xl font-bold text-white mb-2">Run Details</h1>
-          <div className="flex items-center gap-3 text-sm text-neutral-400">
-            <span className="font-mono">{runId}</span>
+          <h1 className="text-3xl font-bold dash-text-primary mb-2">Run Details</h1>
+          <div className="flex items-center gap-3 text-sm dash-text-muted">
+            <span className="font-Poppins">{runId}</span>
             {run.tower_id && (
               <>
                 <span>•</span>
@@ -476,7 +476,7 @@ export default function RunDetail() {
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={exportToJSON}
-            className="rounded-xl glass border border-neutral-700 text-white px-4 py-2 text-sm font-semibold hover:bg-premium-card-hover transition-colors flex items-center gap-2"
+            className="rounded-xl glass border border-[var(--dash-panel-border)] dash-text-primary px-4 py-2 text-sm font-semibold hover:bg-premium-card-hover transition-colors flex items-center gap-2"
           >
             <Download className="text-lg" />
             Export JSON
@@ -506,10 +506,10 @@ export default function RunDetail() {
       </div>
 
       {/* Status Card */}
-      <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
+      <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <div className="text-xs text-neutral-400 uppercase tracking-wider mb-2">Status</div>
+            <div className="text-xs dash-text-muted uppercase tracking-wider mb-2">Status</div>
             <div className="flex items-center gap-2">
               {run.status === "completed" ? (
                 <CheckCircle2 className="text-green-400 text-xl" />
@@ -518,30 +518,30 @@ export default function RunDetail() {
               ) : (
                 <Clock className="text-yellow-400 text-xl" />
               )}
-              <span className="text-lg font-semibold text-white capitalize">{run.status}</span>
+              <span className="text-lg font-semibold dash-text-primary capitalize">{run.status}</span>
             </div>
           </div>
           <div>
-            <div className="text-xs text-neutral-400 uppercase tracking-wider mb-2">Findings</div>
-            <div className="text-2xl font-bold text-white">{run.findings_count || 0}</div>
+            <div className="text-xs dash-text-muted uppercase tracking-wider mb-2">Findings</div>
+            <div className="text-2xl font-bold dash-text-primary">{run.findings_count || 0}</div>
           </div>
           <div>
-            <div className="text-xs text-neutral-400 uppercase tracking-wider mb-2">AI Confidence</div>
-            <div className="text-2xl font-bold text-white">
+            <div className="text-xs dash-text-muted uppercase tracking-wider mb-2">AI Confidence</div>
+            <div className="text-2xl font-bold dash-text-primary">
               {run.ai_confidence ? `${Math.round(run.ai_confidence * 100)}%` : "—"}
             </div>
           </div>
           <div>
-            <div className="text-xs text-neutral-400 uppercase tracking-wider mb-2">Created</div>
-            <div className="text-sm text-white">{createdLabel ? new Date(createdLabel).toLocaleString() : "—"}</div>
+            <div className="text-xs dash-text-muted uppercase tracking-wider mb-2">Created</div>
+            <div className="text-sm dash-text-primary">{createdLabel ? new Date(createdLabel).toLocaleString() : "—"}</div>
           </div>
         </div>
       </div>
 
       {/* Overlays Gallery – uses artifact URLs from backend (overlay_url, report_url, etc.) */}
       {(artifacts.overlay_url || artifacts.overlay_path || artifacts.annotated_url || artifacts.annotated_image || artifacts.thermal_url || artifacts.thermal_overlay) && (
-        <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
-          <h2 className="text-xl font-semibold text-white mb-4">Image Overlays</h2>
+        <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium">
+          <h2 className="text-xl font-semibold dash-text-primary mb-4">Image Overlays</h2>
           <div className="mb-4 flex gap-2">
             {(artifacts.overlay_url || artifacts.overlay_path) && (
               <button
@@ -549,7 +549,7 @@ export default function RunDetail() {
                 className={`rounded-xl px-4 py-2 text-sm font-semibold border transition-all ${
                   selectedImage === "overlay"
                     ? "bg-gradient-accent text-white border-premium-accent shadow-glow"
-                    : "glass border-neutral-700 text-neutral-300 hover:bg-premium-card-hover"
+                    : "glass border-[var(--dash-panel-border)] dash-text-body hover:bg-premium-card-hover"
                 }`}
               >
                 Detection Overlay
@@ -561,7 +561,7 @@ export default function RunDetail() {
                 className={`rounded-xl px-4 py-2 text-sm font-semibold border transition-all ${
                   selectedImage === "annotated"
                     ? "bg-gradient-accent text-white border-premium-accent shadow-glow"
-                    : "glass border-neutral-700 text-neutral-300 hover:bg-premium-card-hover"
+                    : "glass border-[var(--dash-panel-border)] dash-text-body hover:bg-premium-card-hover"
                 }`}
               >
                 Annotated Image
@@ -573,14 +573,14 @@ export default function RunDetail() {
                 className={`rounded-xl px-4 py-2 text-sm font-semibold border transition-all ${
                   selectedImage === "thermal"
                     ? "bg-gradient-accent text-white border-premium-accent shadow-glow"
-                    : "glass border-neutral-700 text-neutral-300 hover:bg-premium-card-hover"
+                    : "glass border-[var(--dash-panel-border)] dash-text-body hover:bg-premium-card-hover"
                 }`}
               >
                 Thermal Overlay
               </button>
             )}
           </div>
-          <div className="rounded-lg overflow-hidden border border-neutral-700 bg-neutral-900/50 flex items-center justify-center min-h-0">
+          <div className="rounded-lg overflow-hidden border border-[var(--dash-panel-border)] flex items-center justify-center min-h-0" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
             <img
               src={
                 resolveArtifactUrl(artifacts, runId, selectedImage) ?? ""
@@ -598,43 +598,43 @@ export default function RunDetail() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 {run.metadata.thermal_insights.temp_min != null && (
                   <div>
-                    <div className="text-xs text-neutral-400">Min temp</div>
-                    <div className="text-lg font-bold text-white">{run.metadata.thermal_insights.temp_min.toFixed(1)} °C</div>
+                    <div className="text-xs dash-text-muted">Min temp</div>
+                    <div className="text-lg font-bold dash-text-primary">{run.metadata.thermal_insights.temp_min.toFixed(1)} °C</div>
                   </div>
                 )}
                 {run.metadata.thermal_insights.temp_max != null && (
                   <div>
-                    <div className="text-xs text-neutral-400">Max temp</div>
+                    <div className="text-xs dash-text-muted">Max temp</div>
                     <div className="text-lg font-bold text-orange-400">{run.metadata.thermal_insights.temp_max.toFixed(1)} °C</div>
                   </div>
                 )}
                 {run.metadata.thermal_insights.temp_mean != null && (
                   <div>
-                    <div className="text-xs text-neutral-400">Mean temp</div>
-                    <div className="text-lg font-bold text-white">{run.metadata.thermal_insights.temp_mean.toFixed(1)} °C</div>
+                    <div className="text-xs dash-text-muted">Mean temp</div>
+                    <div className="text-lg font-bold dash-text-primary">{run.metadata.thermal_insights.temp_mean.toFixed(1)} °C</div>
                   </div>
                 )}
               </div>
               {run.metadata.thermal_insights.roi_analysis && (
-                <div className="mt-3 pt-3 border-t border-neutral-700 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <div className="mt-3 pt-3 border-t border-[var(--dash-panel-border)] grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                   {run.metadata.thermal_insights.roi_analysis.Tp_max != null && (
-                    <div><span className="text-neutral-400">Part max:</span> <span className="text-white font-medium">{run.metadata.thermal_insights.roi_analysis.Tp_max.toFixed(1)} °C</span></div>
+                    <div><span className="dash-text-muted">Part max:</span> <span className="dash-text-primary font-medium">{run.metadata.thermal_insights.roi_analysis.Tp_max.toFixed(1)} °C</span></div>
                   )}
                   {run.metadata.thermal_insights.roi_analysis.Tw_max != null && (
-                    <div><span className="text-neutral-400">Wire max:</span> <span className="text-white font-medium">{run.metadata.thermal_insights.roi_analysis.Tw_max.toFixed(1)} °C</span></div>
+                    <div><span className="dash-text-muted">Wire max:</span> <span className="dash-text-primary font-medium">{run.metadata.thermal_insights.roi_analysis.Tw_max.toFixed(1)} °C</span></div>
                   )}
                   {run.metadata.thermal_insights.roi_analysis.dT != null && (
-                    <div><span className="text-neutral-400">ΔT:</span> <span className="text-orange-400 font-medium">{run.metadata.thermal_insights.roi_analysis.dT.toFixed(1)} °C</span></div>
+                    <div><span className="dash-text-muted">ΔT:</span> <span className="text-orange-400 font-medium">{run.metadata.thermal_insights.roi_analysis.dT.toFixed(1)} °C</span></div>
                   )}
                   {run.metadata.thermal_insights.roi_analysis.severity && (
-                    <div><span className="text-neutral-400">Severity:</span> <span className="font-semibold text-amber-400">{run.metadata.thermal_insights.roi_analysis.severity}</span></div>
+                    <div><span className="dash-text-muted">Severity:</span> <span className="font-semibold text-amber-400">{run.metadata.thermal_insights.roi_analysis.severity}</span></div>
                   )}
                 </div>
               )}
               {run.metadata.thermal_insights.temp_min == null && run.metadata.thermal_insights.temp_max == null && run.metadata.thermal_insights.raw_output && (
-                <div className="mt-3 pt-3 border-t border-neutral-700">
+                <div className="mt-3 pt-3 border-t border-[var(--dash-panel-border)]">
                   <div className="text-xs text-amber-400 font-semibold mb-1">Analysis output (temps could not be parsed):</div>
-                  <pre className="text-xs text-neutral-400 bg-neutral-900/80 p-3 rounded-lg overflow-x-auto max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
+                  <pre className="text-xs dash-text-muted p-3 rounded-lg overflow-x-auto max-h-32 overflow-y-auto whitespace-pre-wrap font-Poppins" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
                     {run.metadata.thermal_insights.raw_output.trim() || "(empty)"}
                   </pre>
                 </div>
@@ -646,9 +646,9 @@ export default function RunDetail() {
 
       {/* Overlay gallery: many overlays per run (list + stream + Download all) */}
       {overlayList.length > 0 && (
-        <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
+        <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-            <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+            <h2 className="text-xl font-semibold dash-text-primary flex items-center gap-2">
               <ImageIcon className="text-2xl text-premium-accent" />
               Overlay Gallery ({filteredOverlays.length}{overlayList.length !== filteredOverlays.length ? ` of ${overlayList.length}` : ""})
             </h2>
@@ -662,19 +662,20 @@ export default function RunDetail() {
             </a>
           </div>
           {/* Severity counts: prefer detections (accurate) over overlay filenames */}
-          <div className="flex flex-wrap items-center gap-4 mb-4 px-3 py-2 rounded-lg bg-neutral-900/50 border border-neutral-700">
-            <span className="text-sm text-neutral-400">By severity:</span>
+          <div className="flex flex-wrap items-center gap-4 mb-4 px-3 py-2 rounded-lg border border-[var(--dash-panel-border)]" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
+            <span className="text-sm dash-text-muted">By severity:</span>
             <span className="text-sm font-semibold text-red-400">HIGH: {detectionCountsBySeverity.HIGH}</span>
             <span className="text-sm font-semibold text-yellow-400">MEDIUM: {detectionCountsBySeverity.MEDIUM}</span>
             <span className="text-sm font-semibold text-green-400">LOW: {detectionCountsBySeverity.LOW}</span>
           </div>
           <div className="flex flex-wrap gap-3 mb-4">
             <div className="flex items-center gap-2">
-              <label className="text-sm text-neutral-400">Severity</label>
+              <label className="text-sm dash-text-muted">Severity</label>
               <select
                 value={overlayFilterSeverity}
                 onChange={(e) => setOverlayFilterSeverity(e.target.value)}
-                className="rounded-lg glass border border-neutral-700 bg-neutral-900/80 text-white px-3 py-2 text-sm focus:ring-2 focus:ring-premium-accent outline-none"
+                className="rounded-lg glass border border-[var(--dash-panel-border)] dash-text-primary px-3 py-2 text-sm focus:ring-2 focus:ring-premium-accent outline-none"
+                style={{ backgroundColor: "var(--dash-nested-bg)" }}
               >
                 <option value="">All</option>
                 {overlaySeverities.filter(Boolean).map((s) => (
@@ -683,13 +684,14 @@ export default function RunDetail() {
               </select>
             </div>
             <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-sm">
-              <Search className="text-neutral-400 text-lg shrink-0" />
+              <Search className="dash-text-muted text-lg shrink-0" />
               <input
                 type="text"
                 placeholder="Search by image stem (e.g. DJI_0437)"
                 value={overlaySearchStem}
                 onChange={(e) => setOverlaySearchStem(e.target.value)}
-                className="w-full rounded-lg glass border border-neutral-700 bg-neutral-900/80 text-white px-3 py-2 text-sm placeholder-neutral-500 focus:ring-2 focus:ring-premium-accent outline-none"
+                className="w-full rounded-lg glass border border-[var(--dash-panel-border)] dash-text-primary px-3 py-2 text-sm placeholder-neutral-500 focus:ring-2 focus:ring-premium-accent outline-none"
+                style={{ backgroundColor: "var(--dash-nested-bg)" }}
               />
             </div>
           </div>
@@ -703,15 +705,16 @@ export default function RunDetail() {
                   ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/50"
                   : sev === "normal"
                   ? "bg-green-500/20 text-green-400 border-green-500/50"
-                  : "bg-neutral-500/20 text-neutral-400 border-neutral-500/50";
+                  : "bg-[var(--dash-nested-bg-soft)] dash-text-muted border-[var(--dash-panel-border)]";
               return (
                 <button
                   key={item.filename}
                   type="button"
                   onClick={() => setFullSizeOverlay(item.filename)}
-                  className="rounded-lg overflow-hidden border border-neutral-700 bg-neutral-900/50 hover:border-premium-accent/50 hover:shadow-glow transition-all text-left group"
+                  className="rounded-lg overflow-hidden border border-[var(--dash-panel-border)] hover:border-premium-accent/50 hover:shadow-glow transition-all text-left group"
+                  style={{ backgroundColor: "var(--dash-nested-bg)" }}
                 >
-                  <div className="aspect-video bg-neutral-800 flex items-center justify-center relative">
+                  <div className="aspect-video flex items-center justify-center relative" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
                     <img
                       src={overlayFileUrl(runId, item.filename)}
                       alt={item.filename}
@@ -721,7 +724,7 @@ export default function RunDetail() {
                       {sev}
                     </span>
                   </div>
-                  <div className="px-2 py-1.5 text-xs text-neutral-400 truncate" title={item.filename}>
+                  <div className="px-2 py-1.5 text-xs dash-text-muted truncate" title={item.filename}>
                     {item.filename}
                   </div>
                 </button>
@@ -729,7 +732,7 @@ export default function RunDetail() {
             })}
           </div>
           {filteredOverlays.length === 0 && (
-            <div className="text-center py-8 text-neutral-400">No overlays match the current filters.</div>
+            <div className="text-center py-8 dash-text-muted">No overlays match the current filters.</div>
           )}
         </div>
       )}
@@ -737,7 +740,7 @@ export default function RunDetail() {
       {/* Full-size overlay modal: Esc close, arrows nav, badge, zoom */}
       {fullSizeOverlay && modalTotal > 0 && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--dash-overlay-scrim)] p-4"
           onClick={() => setFullSizeOverlay(null)}
           role="dialog"
           aria-modal="true"
@@ -746,7 +749,8 @@ export default function RunDetail() {
           <button
             type="button"
             onClick={() => setFullSizeOverlay(null)}
-            className="absolute top-4 right-4 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700 transition-colors z-10"
+            className="absolute top-4 right-4 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors z-10"
+            style={{ backgroundColor: "var(--dash-elevated-bg)" }}
             aria-label="Close"
           >
             <X className="text-2xl" />
@@ -762,7 +766,8 @@ export default function RunDetail() {
                   const nextIdx = idx <= 0 ? modalTotal - 1 : idx - 1;
                   setFullSizeOverlay(filteredOverlays[nextIdx].filename);
                 }}
-                className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700 transition-colors z-10"
+                className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors z-10"
+                style={{ backgroundColor: "var(--dash-elevated-bg)" }}
                 aria-label="Previous overlay"
               >
                 <ChevronLeft className="text-2xl" />
@@ -775,7 +780,8 @@ export default function RunDetail() {
                   const nextIdx = idx < 0 || idx >= modalTotal - 1 ? 0 : idx + 1;
                   setFullSizeOverlay(filteredOverlays[nextIdx].filename);
                 }}
-                className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700 transition-colors z-10"
+                className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors z-10"
+                style={{ backgroundColor: "var(--dash-elevated-bg)" }}
                 aria-label="Next overlay"
               >
                 <ChevronRight className="text-2xl" />
@@ -784,23 +790,23 @@ export default function RunDetail() {
           )}
 
           <div className="absolute top-4 left-4 z-10 flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-            <span className="rounded-lg border border-neutral-600 bg-neutral-800/90 px-3 py-1.5 text-sm font-medium text-white">
+            <span className="rounded-lg border border-neutral-600 px-3 py-1.5 text-sm font-medium dash-text-primary" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
               {overlayTag(filteredOverlays.find((o) => o.filename === fullSizeOverlay) ?? { filename: fullSizeOverlay, url: "" })} • {modalIndex + 1}/{modalTotal}
             </span>
-            <span className="flex items-center gap-1 rounded-lg border border-neutral-600 bg-neutral-800/90">
+            <span className="flex items-center gap-1 rounded-lg border border-neutral-600" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
               <button
                 type="button"
                 onClick={() => setModalZoom((z) => Math.max(0.25, z - 0.25))}
-                className="p-1.5 text-white hover:bg-neutral-700 rounded-l-md"
+                className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-l-md"
                 aria-label="Zoom out"
               >
                 <Minus className="text-lg" />
               </button>
-              <span className="px-2 text-sm text-neutral-300 min-w-[3rem] text-center">{Math.round(modalZoom * 100)}%</span>
+              <span className="px-2 text-sm dash-text-body min-w-[3rem] text-center">{Math.round(modalZoom * 100)}%</span>
               <button
                 type="button"
                 onClick={() => setModalZoom((z) => Math.min(3, z + 0.25))}
-                className="p-1.5 text-white hover:bg-neutral-700 rounded-r-md"
+                className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-r-md"
                 aria-label="Zoom in"
               >
                 <Plus className="text-lg" />
@@ -828,9 +834,9 @@ export default function RunDetail() {
         <div className="glass rounded-2xl border border-yellow-500/50 bg-yellow-500/10 p-6 shadow-premium">
           <div className="flex items-center gap-3 mb-4">
             <AlertCircle className="text-2xl text-yellow-400" />
-            <h2 className="text-xl font-semibold text-white">Needs Review ({needsReview.length})</h2>
+            <h2 className="text-xl font-semibold dash-text-primary">Needs Review ({needsReview.length})</h2>
           </div>
-          <div className="text-sm text-neutral-300 mb-4">
+          <div className="text-sm dash-text-body mb-4">
             The following detections have low confidence or require manual review:
           </div>
           <div className="space-y-2 max-h-[300px] overflow-y-auto">
@@ -840,14 +846,14 @@ export default function RunDetail() {
                 className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 text-sm"
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className="font-semibold text-white">
+                  <span className="font-semibold dash-text-primary">
                     {detection.component_type} - {detection.defect_type || "Detection"}
                   </span>
                   <span className={`px-2 py-1 rounded text-xs font-semibold border ${getSeverityColor(displaySeverity(detection))}`}>
                     {displaySeverity(detection)}
                   </span>
                 </div>
-                <div className="text-xs text-neutral-400">
+                <div className="text-xs dash-text-muted">
                   Confidence: {Math.round((detection.det_conf || 0) * 100)}%
                   {detection.defect_conf && ` • Defect: ${Math.round(detection.defect_conf * 100)}%`}
                   {detection.thermal_flag && (
@@ -864,18 +870,18 @@ export default function RunDetail() {
       )}
 
       {/* Detections Table */}
-      <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
+      <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-white">All Detections ({detections.length})</h2>
-          <div className="flex gap-2 text-xs text-neutral-400">
+          <h2 className="text-xl font-semibold dash-text-primary">All Detections ({detections.length})</h2>
+          <div className="flex gap-2 text-xs dash-text-muted">
             <span className="text-green-400">✓ Confirmed: {confirmed.length}</span>
             <span className="text-yellow-400">⚠ Review: {needsReview.length}</span>
-            <span className="text-neutral-400">✗ False Positive: {falsePositives.length}</span>
+            <span className="dash-text-muted">✗ False Positive: {falsePositives.length}</span>
           </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-premium-card/50 text-neutral-300">
+            <thead className="bg-premium-card/50 dash-text-body">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold">Component</th>
                 <th className="text-left px-4 py-3 font-semibold">Defect</th>
@@ -886,10 +892,10 @@ export default function RunDetail() {
                 <th className="text-left px-4 py-3 font-semibold">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-800">
+            <tbody className="divide-y divide-[var(--dash-panel-border)]">
               {detections.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-neutral-400">
+                  <td colSpan={7} className="px-4 py-8 text-center dash-text-muted">
                     No detections found
                   </td>
                 </tr>
@@ -898,9 +904,9 @@ export default function RunDetail() {
                   const actionStatus = reviewActions[idx] || detection.status;
                   return (
                     <tr key={idx} className="hover:bg-premium-card-hover/50 transition-colors">
-                      <td className="px-4 py-3 text-white font-medium">{formatDetectionLabel(detection.component_type ?? "Unknown")}</td>
-                      <td className="px-4 py-3 text-neutral-300">{formatDetectionLabel(detection.defect_type ?? "") || "—"}</td>
-                      <td className="px-4 py-3 text-neutral-300">
+                      <td className="px-4 py-3 dash-text-primary font-medium">{formatDetectionLabel(detection.component_type ?? "Unknown")}</td>
+                      <td className="px-4 py-3 dash-text-body">{formatDetectionLabel(detection.defect_type ?? "") || "—"}</td>
+                      <td className="px-4 py-3 dash-text-body">
                         {Math.round((detection.det_conf || 0) * 100)}%
                         {detection.defect_conf && ` / ${Math.round(detection.defect_conf * 100)}%`}
                       </td>
@@ -916,7 +922,7 @@ export default function RunDetail() {
                               ? "bg-green-500/20 text-green-400 border border-green-500/50"
                               : actionStatus === "needs_review"
                               ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/50"
-                              : "bg-neutral-500/20 text-neutral-400 border border-neutral-500/50"
+                              : "bg-[var(--dash-nested-bg-soft)] dash-text-muted border border-[var(--dash-panel-border)]"
                           }`}
                         >
                           {(actionStatus ?? "needs_review").replace("_", " ").toUpperCase()}
@@ -929,7 +935,7 @@ export default function RunDetail() {
                             Yes
                           </span>
                         ) : (
-                          <span className="text-neutral-500">No</span>
+                          <span className="dash-text-subtle">No</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -980,21 +986,21 @@ export default function RunDetail() {
 
       {/* Metadata */}
       {run.metadata && (
-        <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
-          <h2 className="text-xl font-semibold text-white mb-4">Metadata</h2>
+        <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium">
+          <h2 className="text-xl font-semibold dash-text-primary mb-4">Metadata</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             {run.metadata.gps && (
               <div>
-                <div className="text-neutral-400 mb-1">Location</div>
-                <div className="text-white flex items-center gap-2">
+                <div className="dash-text-muted mb-1">Location</div>
+                <div className="dash-text-primary flex items-center gap-2">
                   <MapPin className="text-lg" />
                   {run.metadata.gps.lat.toFixed(6)}, {run.metadata.gps.lng.toFixed(6)}
                 </div>
               </div>
             )}
             <div>
-              <div className="text-neutral-400 mb-1">Timestamp</div>
-              <div className="text-white">
+              <div className="dash-text-muted mb-1">Timestamp</div>
+              <div className="dash-text-primary">
                 {(run.metadata.timestamp ?? createdLabel)
                   ? new Date(run.metadata.timestamp ?? createdLabel).toLocaleString()
                   : "—"}
@@ -1002,8 +1008,8 @@ export default function RunDetail() {
             </div>
             {run.metadata.phase && (
               <div>
-                <div className="text-neutral-400 mb-1">Phase</div>
-                <div className="text-white">{run.metadata.phase}</div>
+                <div className="dash-text-muted mb-1">Phase</div>
+                <div className="dash-text-primary">{run.metadata.phase}</div>
               </div>
             )}
           </div>

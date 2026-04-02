@@ -76,7 +76,7 @@ function FloatingDockMobile({
                   to={item.href}
                   end={item.end}
                   onClick={() => setOpen(false)}
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 border border-neutral-700 text-neutral-200"
+                  className="dock-item-surface flex h-10 w-10 items-center justify-center rounded-full border"
                 >
                   <div className="h-5 w-5 flex items-center justify-center [&_svg]:size-5">{item.icon}</div>
                 </NavLink>
@@ -88,10 +88,10 @@ function FloatingDockMobile({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 border border-neutral-700"
+        className="dock-fab flex h-10 w-10 items-center justify-center rounded-full border"
         aria-label={open ? "Close menu" : "Open menu"}
       >
-        <IconLayoutNavbarCollapse className="h-5 w-5 text-neutral-400" />
+        <IconLayoutNavbarCollapse className="h-5 w-5 text-[var(--dock-menu-icon)]" />
       </button>
     </div>
   );
@@ -110,7 +110,7 @@ function FloatingDockDesktop({
       onMouseMove={(e) => mouseX.set(e.pageX)}
       onMouseLeave={() => mouseX.set(Infinity)}
       className={cn(
-        "mx-auto flex h-16 items-end gap-4 rounded-2xl border border-neutral-700 bg-neutral-900/95 px-4 pb-3 shadow-xl backdrop-blur-sm",
+        "dock-shell mx-auto flex h-16 items-end gap-4 rounded-2xl border px-4 pb-3 shadow-xl backdrop-blur-sm",
         className,
       )}
     >
@@ -178,7 +178,7 @@ function IconContainer({
       className={({ isActive }) =>
         cn(
           "flex items-end rounded-full p-0.5",
-          isActive && "ring-2 ring-cyan-500/50 ring-offset-2 ring-offset-[#0a0e1a]",
+          isActive && "ring-2 ring-cyan-500/50 ring-offset-2 ring-offset-[var(--dock-ring-offset)]",
         )
       }
     >
@@ -187,7 +187,7 @@ function IconContainer({
         style={{ width, height }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        className="relative flex aspect-square items-center justify-center rounded-full bg-neutral-800 border border-neutral-700"
+        className="dock-item-surface relative flex aspect-square items-center justify-center rounded-full border"
       >
         <AnimatePresence>
           {hovered && (
@@ -195,7 +195,7 @@ function IconContainer({
               initial={{ opacity: 0, y: 10, x: "-50%" }}
               animate={{ opacity: 1, y: 0, x: "-50%" }}
               exit={{ opacity: 0, y: 2, x: "-50%" }}
-              className="absolute -top-8 left-1/2 w-fit rounded-md border border-neutral-700 bg-neutral-800 px-2 py-0.5 text-xs whitespace-pre text-white"
+              className="dock-tooltip-surface absolute -top-8 left-1/2 w-fit rounded-md border px-2 py-0.5 text-xs whitespace-pre"
             >
               {title}
             </motion.div>
@@ -203,7 +203,7 @@ function IconContainer({
         </AnimatePresence>
         <motion.div
           style={{ width: widthIcon, height: heightIcon }}
-          className="flex items-center justify-center text-neutral-200 [&_svg]:max-h-full [&_svg]:max-w-full"
+          className="flex items-center justify-center [&_svg]:max-h-full [&_svg]:max-w-full"
         >
           {icon}
         </motion.div>

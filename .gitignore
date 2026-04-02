@@ -57,3 +57,6 @@ backend/models/**/*.pth
 backend/models/**/*.onnx
 baackend/models/windows/
 backend/models/
+
+# cusrsor default files
+.cursor

@@ -139,15 +139,15 @@ export function ThermalAnalysisConfigurationInteractive({
         <>
           <div className="mb-2 flex items-center gap-2">
             <Activity className="text-emerald-400" size={20} />
-            <h2 className="text-lg font-semibold text-white">Analysis Configuration</h2>
+            <h2 className="text-lg font-semibold dash-text-primary">Analysis Configuration</h2>
           </div>
           <div>
-            <div className="mb-2 text-sm font-medium text-white">Object Type (Emissivity)</div>
+            <div className="mb-2 text-sm font-medium dash-text-primary">Object Type (Emissivity)</div>
             <select
               value={objectType}
               onChange={(e) => onObjectTypeChange(e.target.value)}
               disabled={processing}
-              className="w-full rounded-lg border border-neutral-700 bg-premium-card px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
+              className="w-full rounded-lg border border-[var(--dash-panel-border)] px-3 py-2 text-sm dash-text-primary outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
             >
               <option value="">Auto / Default</option>
               {THERMAL_OBJECT_TYPES.filter(Boolean).map((t) => (
@@ -158,12 +158,12 @@ export function ThermalAnalysisConfigurationInteractive({
             </select>
           </div>
           <div>
-            <div className="mb-2 text-sm font-medium text-white">Color Palette</div>
+            <div className="mb-2 text-sm font-medium dash-text-primary">Color Palette</div>
             <select
               value={palette}
               onChange={(e) => onPaletteChange(Number(e.target.value))}
               disabled={processing}
-              className="w-full rounded-lg border border-neutral-700 bg-premium-card px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
+              className="w-full rounded-lg border border-[var(--dash-panel-border)] px-3 py-2 text-sm dash-text-primary outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
             >
               {THERMAL_PALETTES.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -176,7 +176,7 @@ export function ThermalAnalysisConfigurationInteractive({
       )}
       {!hideTemperatureUnitSection && (
         <div>
-          <div className="mb-2 text-sm font-medium text-white">Temperature Unit</div>
+          <div className="mb-2 text-sm font-medium dash-text-primary">Temperature Unit</div>
           <div className="flex gap-1">
             {THERMAL_UNITS.map((u) => (
               <button
@@ -187,7 +187,7 @@ export function ThermalAnalysisConfigurationInteractive({
                 className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-all disabled:opacity-50 ${
                   unit === u
                     ? "border border-emerald-500/40 bg-emerald-500/20 text-emerald-400"
-                    : "border border-neutral-700 bg-premium-card text-neutral-400 hover:text-white"
+                    : "border border-[var(--dash-panel-border)] dash-text-muted hover:dash-text-primary"
                 }`}
               >
                 {u}
@@ -197,10 +197,10 @@ export function ThermalAnalysisConfigurationInteractive({
         </div>
       )}
       {!hideProcessingPipelineSection && (
-        <div className="rounded-xl border border-neutral-700 bg-premium-card/30 p-4">
+        <div className="rounded-xl border border-[var(--dash-panel-border)] p-4">
           <div className="mb-3 flex items-center gap-2">
             <Sparkles className="text-emerald-400" size={16} />
-            <div className="text-sm font-semibold text-white">Processing Pipeline</div>
+            <div className="text-sm font-semibold dash-text-primary">Processing Pipeline</div>
           </div>
           <div className="space-y-2">
             {[
@@ -211,10 +211,10 @@ export function ThermalAnalysisConfigurationInteractive({
               "Environmental analysis",
             ].map((step, i) => (
               <div key={i} className="flex items-center gap-3">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-700 text-xs font-bold text-neutral-400">
+                <div className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold dash-text-muted" style={{ backgroundColor: "var(--dash-inset-border)" }}>
                   {i + 1}
                 </div>
-                <span className="text-xs text-neutral-300">{step}</span>
+                <span className="text-xs dash-text-body">{step}</span>
               </div>
             ))}
           </div>
@@ -313,14 +313,14 @@ export function ThermalAnalysisDetailHeader({
 }: ThermalAnalysisDetailHeaderProps) {
   const pad = compact ? "px-4 py-3" : "p-5";
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 border-b border-neutral-700 ${pad}`}>
+    <div className={`flex flex-wrap items-center justify-between gap-3 border-b border-[var(--dash-panel-border)] ${pad}`}>
       <div className="flex min-w-0 items-center gap-3">
         <Eye className="shrink-0 text-emerald-400" size={20} />
         <div className="min-w-0">
-          <h3 className="truncate text-base font-bold text-white md:text-lg" title={filename}>
+          <h3 className="truncate text-base font-bold dash-text-primary md:text-lg" title={filename}>
             {filename}
           </h3>
-          <p className="text-xs text-neutral-400">Thermal Analysis Detail</p>
+          <p className="text-xs dash-text-muted">Thermal Analysis Detail</p>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -328,18 +328,18 @@ export function ThermalAnalysisDetailHeader({
           type="button"
           onClick={onPrev}
           disabled={fileCountDisplay <= 1}
-          className="rounded-lg glass border border-neutral-700 p-2 text-neutral-400 transition-colors hover:text-white disabled:opacity-40"
+          className="rounded-lg glass border border-[var(--dash-panel-border)] p-2 dash-text-muted transition-colors hover:dash-text-primary disabled:opacity-40"
         >
           <ChevronLeft size={16} />
         </button>
-        <span className="text-xs text-neutral-500 tabular-nums">
+        <span className="text-xs dash-text-subtle tabular-nums">
           {fileCountDisplay > 0 ? `${fileIndexDisplay + 1}/${fileCountDisplay}` : "—"}
         </span>
         <button
           type="button"
           onClick={onNext}
           disabled={fileCountDisplay <= 1}
-          className="rounded-lg glass border border-neutral-700 p-2 text-neutral-400 transition-colors hover:text-white disabled:opacity-40"
+          className="rounded-lg glass border border-[var(--dash-panel-border)] p-2 dash-text-muted transition-colors hover:dash-text-primary disabled:opacity-40"
         >
           <ChevronRight size={16} />
         </button>
@@ -358,7 +358,7 @@ export function ThermalAnalysisDetailHeader({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg glass border border-neutral-700 p-2 text-neutral-400 transition-colors hover:text-white"
+            className="rounded-lg glass border border-[var(--dash-panel-border)] p-2 dash-text-muted transition-colors hover:dash-text-primary"
           >
             <X size={16} />
           </button>
@@ -459,7 +459,7 @@ export function ThermalAnalysisDetailInner({
   return (
     <div className="space-y-5 p-4 md:p-5">
       {loading ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-16 text-neutral-400 md:py-24">
+        <div className="flex flex-col items-center justify-center gap-3 py-16 dash-text-muted md:py-24">
           <Loader2 className="animate-spin" size={32} />
           <span className="text-sm">Loading thermal analysis…</span>
         </div>
@@ -467,7 +467,7 @@ export function ThermalAnalysisDetailInner({
         <>
           <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
             {imgSrc ? (
-              <div className="relative isolate w-full self-start overflow-hidden rounded-xl border border-neutral-700 bg-neutral-950 md:col-span-2">
+              <div className="relative isolate w-full self-start overflow-hidden rounded-xl border border-[var(--dash-panel-border)] md:col-span-2" style={{ backgroundColor: "var(--dash-media-bg)" }}>
                 <img
                   ref={imgRef}
                   src={imgSrc}
@@ -501,7 +501,7 @@ export function ThermalAnalysisDetailInner({
                   />
                 )}
                 {enableRoi && !roiActive && (
-                  <span className="glass absolute right-[4.5rem] top-2 z-20 rounded-md border border-neutral-600/50 bg-white/10 px-2 py-1 text-[10px] font-semibold text-neutral-100 backdrop-blur-md">
+                  <span className="glass absolute right-[4.5rem] top-2 z-20 rounded-md border border-neutral-600/50 px-2 py-1 text-[10px] font-semibold dash-text-primary backdrop-blur-md" style={{ backgroundColor: "var(--dash-nested-bg-soft)" }}>
                     Full ROI
                   </span>
                 )}
@@ -512,7 +512,7 @@ export function ThermalAnalysisDetailInner({
                     className={`absolute right-2 top-2 z-20 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
                       roiActive
                         ? "border border-emerald-400 bg-emerald-500/80 text-white"
-                        : "glass border border-neutral-600/50 bg-white/10 text-neutral-100 backdrop-blur-md hover:bg-white/15"
+                        : "glass border border-neutral-600/50 bg-[var(--dash-nested-bg-soft)] dash-text-primary backdrop-blur-md hover:bg-white/15"
                     }`}
                   >
                     <Crosshair size={11} />
@@ -526,14 +526,14 @@ export function ThermalAnalysisDetailInner({
                 )}
               </div>
             ) : (
-              <div className="flex min-h-[200px] w-full items-center justify-center self-start rounded-xl border border-neutral-700 bg-neutral-900/50 text-sm text-neutral-500 md:col-span-2">
+              <div className="flex min-h-[200px] w-full items-center justify-center self-start rounded-xl border border-[var(--dash-panel-border)] text-sm dash-text-subtle md:col-span-2" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
                 No thermal preview
               </div>
             )}
             {(analysisConfiguration != null || stats || roiLoading || roiStats) && (
               <div className="flex flex-col gap-4">
                 {analysisConfiguration != null && (
-                  <div className="rounded-xl border border-neutral-700 bg-premium-card/50 p-4">
+                  <div className="rounded-xl border p-4">
                     <ThermalAnalysisConfigurationInteractive
                       objectType={cfgObjectType}
                       onObjectTypeChange={setCfgObjectType}
@@ -547,10 +547,10 @@ export function ThermalAnalysisDetailInner({
                   </div>
                 )}
                 {(stats || roiLoading || roiStats) && (
-                  <div className="rounded-xl border border-neutral-700 bg-premium-card/50 p-4">
+                  <div className="rounded-xl border p-4">
                     <div className="mb-4 flex items-center gap-2">
                       <BarChart3 className="text-emerald-400" size={16} />
-                      <h4 className="text-sm font-semibold text-white">Temperature Stats</h4>
+                      <h4 className="text-sm font-semibold dash-text-primary">Temperature Stats</h4>
                     </div>
                     {stats ? (
                       <div className="space-y-2.5">
@@ -559,8 +559,8 @@ export function ThermalAnalysisDetailInner({
                         <StatRow label="Mean" value={`${stats.mean_c != null ? stats.mean_c.toFixed(2) : "—"} ${u}`} color="text-emerald-400" />
                         <StatRow label="Median" value={`${stats.median_c != null ? stats.median_c.toFixed(2) : "—"} ${u}`} color="text-yellow-400" />
                         <StatRow label="Std Dev" value={`${stats.std_c != null ? stats.std_c.toFixed(2) : "—"} ${u}`} color="text-purple-400" />
-                        <div className="my-2 border-t border-neutral-700" />
-                        <StatRow label="Resolution" value={`${stats.width ?? "—"} × ${stats.height ?? "—"}`} color="text-neutral-300" />
+                        <div className="my-2 border-t border-[var(--dash-panel-border)]" />
+                        <StatRow label="Resolution" value={`${stats.width ?? "—"} × ${stats.height ?? "—"}`} color="dash-text-body" />
                         <StatRow
                           label="Temp Range"
                           value={`${stats.max_c != null && stats.min_c != null ? (stats.max_c - stats.min_c).toFixed(2) : "—"} ${u}`}
@@ -569,12 +569,12 @@ export function ThermalAnalysisDetailInner({
                       </div>
                     ) : null}
                     {roiLoading && (
-                      <div className={`flex items-center gap-2 text-xs text-emerald-400 ${stats ? "mt-3 border-t border-neutral-700 pt-3" : "mt-1"}`}>
+                      <div className={`flex items-center gap-2 text-xs text-emerald-400 ${stats ? "mt-3 border-t border-[var(--dash-panel-border)] pt-3" : "mt-1"}`}>
                         <Loader2 size={12} className="animate-spin" /> Computing ROI stats...
                       </div>
                     )}
                     {roiChart != null && roiStats != null && !roiLoading && (
-                      <div className="mt-3 border-t border-neutral-700 pt-3">
+                      <div className="mt-3 border-t border-[var(--dash-panel-border)] pt-3">
                         <div className="mb-2 flex items-center gap-2">
                           <Crosshair className="text-emerald-400" size={12} />
                           <span className="text-xs font-semibold text-emerald-400">ROI Statistics</span>
@@ -611,10 +611,10 @@ export function ThermalAnalysisDetailInner({
 
           {analysis && (
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              <div className="rounded-xl border border-neutral-700 bg-premium-card/50 p-4">
+              <div className="rounded-xl border p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <Camera className="text-emerald-400" size={16} />
-                  <h4 className="text-sm font-semibold text-white">Camera & Location</h4>
+                  <h4 className="text-sm font-semibold dash-text-primary">Camera & Location</h4>
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                   <DetailRow label="Camera" value={meta?.camera_model} />
@@ -630,35 +630,35 @@ export function ThermalAnalysisDetailInner({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-neutral-700 bg-premium-card/50 p-4">
+              <div className="rounded-xl border p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <Wind className="text-emerald-400" size={16} />
-                  <h4 className="text-sm font-semibold text-white">Distance & Environment</h4>
+                  <h4 className="text-sm font-semibold dash-text-primary">Distance & Environment</h4>
                 </div>
                 <div className="space-y-3">
                   {analysis.distance_meters?.value != null && (
                     <div>
-                      <span className="text-xs text-neutral-400">Distance</span>
-                      <div className="text-lg font-bold text-white">{analysis.distance_meters.value.toFixed(1)} m</div>
+                      <span className="text-xs dash-text-muted">Distance</span>
+                      <div className="text-lg font-bold dash-text-primary">{analysis.distance_meters.value.toFixed(1)} m</div>
                       
                     </div>
                   )}
-                  <div className="border-t border-neutral-700" />
+                  <div className="border-t border-[var(--dash-panel-border)]" />
                   <div className="grid grid-cols-2 gap-3">
                     {analysis.environment?.ambient_temperature_c?.value != null && (
                       <div>
                         <div className="mb-0.5">
-                          <span className="text-xs text-neutral-400">Ambient Temp</span>
+                          <span className="text-xs dash-text-muted">Ambient Temp</span>
                         </div>
-                        <span className="text-base font-bold text-white">{analysis.environment.ambient_temperature_c.value}°C</span>
+                        <span className="text-base font-bold dash-text-primary">{analysis.environment.ambient_temperature_c.value}°C</span>
                       </div>
                     )}
                     {analysis.environment?.humidity_percent?.value != null && (
                       <div>
                         <div className="mb-0.5">
-                          <span className="text-xs text-neutral-400">Humidity</span>
+                          <span className="text-xs dash-text-muted">Humidity</span>
                         </div>
-                        <span className="text-base font-bold text-white">{analysis.environment.humidity_percent.value}%</span>
+                        <span className="text-base font-bold dash-text-primary">{analysis.environment.humidity_percent.value}%</span>
                       </div>
                     )}
                   </div>
@@ -666,18 +666,18 @@ export function ThermalAnalysisDetailInner({
               </div>
 
               {analysis.thermal_parameters && (
-                <div className="rounded-xl border border-neutral-700 bg-premium-card/50 p-4">
+                <div className="rounded-xl border p-4">
                   <div className="mb-3 flex items-center gap-2">
                     <Gauge className="text-emerald-400" size={16} />
-                    <h4 className="text-sm font-semibold text-white">Thermal Parameters</h4>
+                    <h4 className="text-sm font-semibold dash-text-primary">Thermal Parameters</h4>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     {analysis.thermal_parameters.emissivity && (
                       <div>
                         <div className="mb-0.5">
-                          <span className="text-xs text-neutral-400">Emissivity</span>
+                          <span className="text-xs dash-text-muted">Emissivity</span>
                         </div>
-                        <span className="text-lg font-bold text-white">
+                        <span className="text-lg font-bold dash-text-primary">
                           {analysis.thermal_parameters.emissivity.value != null ? analysis.thermal_parameters.emissivity.value.toFixed(3) : "—"}
                         </span>
                         
@@ -686,9 +686,9 @@ export function ThermalAnalysisDetailInner({
                     {analysis.thermal_parameters.reflected_temperature_c && (
                       <div>
                         <div className="mb-0.5">
-                          <span className="text-xs text-neutral-400">Reflected Temp</span>
+                          <span className="text-xs dash-text-muted">Reflected Temp</span>
                         </div>
-                        <span className="text-lg font-bold text-white">
+                        <span className="text-lg font-bold dash-text-primary">
                           {analysis.thermal_parameters.reflected_temperature_c.value != null
                             ? `${analysis.thermal_parameters.reflected_temperature_c.value.toFixed(1)}°C`
                             : "—"}
@@ -766,14 +766,14 @@ export function ThermalAnalysisDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-[110] flex items-start justify-center overflow-y-auto bg-black/80 px-4 py-8 backdrop-blur-sm"
+      className="fixed inset-0 z-[110] flex items-start justify-center overflow-y-auto bg-[var(--dash-overlay-scrim)] px-4 py-8 backdrop-blur-sm"
       onClick={onClose}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.2 }}
-        className="glass relative w-full max-w-5xl rounded-2xl border border-neutral-700 shadow-premium-lg"
+        className="glass relative w-full max-w-5xl rounded-2xl border border-[var(--dash-panel-border)] shadow-premium-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <ThermalAnalysisDetailHeader
@@ -812,8 +812,8 @@ export function ThermalAnalysisDetailModal({
 function StatRow({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-xs text-neutral-400">{label}</span>
-      <span className={`text-sm font-mono font-semibold ${color}`}>{value}</span>
+      <span className="text-xs dash-text-muted">{label}</span>
+      <span className={`text-sm font-Poppins font-semibold ${color}`}>{value}</span>
     </div>
   );
 }
@@ -821,8 +821,8 @@ function StatRow({ label, value, color }: { label: string; value: string; color:
 function DetailRow({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="flex items-start justify-between py-0.5 gap-1">
-      <span className="text-[11px] text-neutral-500 shrink-0">{label}</span>
-      <span className="text-[11px] text-white font-medium text-right truncate">{value ?? <span className="text-neutral-600 italic">N/A</span>}</span>
+      <span className="text-[11px] dash-text-subtle shrink-0">{label}</span>
+      <span className="text-[11px] dash-text-primary font-medium text-right truncate">{value ?? <span className="text-neutral-600 italic">N/A</span>}</span>
     </div>
   );
 }

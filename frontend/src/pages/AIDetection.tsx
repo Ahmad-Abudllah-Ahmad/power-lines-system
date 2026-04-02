@@ -2,6 +2,8 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { Link, useSearchParams } from "react-router-dom";
 import VideoUpload from "./VideoUpload";
 import ThermalImages from "./ThermalImages";
+import MediaUploadBox from "../components/MediaUploadBox";
+import UploadPipelineStrip from "../components/UploadPipelineStrip";
 import { toast } from "../components/Toast";
 import { formatDetectionLabel } from "../utils/formatLabels";
 import {
@@ -18,7 +20,6 @@ import {
   ZoomOut,
   RotateCcw,
   Crosshair,
-  SlidersHorizontal,
   ArrowLeft,
   FileImage,
   Trash2,
@@ -567,15 +568,15 @@ export default function AIDetection() {
 
   return (
     <div className="space-y-6">
-      <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
+      <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium">
         <div className="flex items-center gap-3 mb-3">
-          <Link to="/dashboard" className="text-neutral-400 hover:text-white transition-colors">
+          <Link to="/dashboard" className="dash-text-muted hover:dash-text-primary transition-colors">
             <ArrowLeft size={20} />
           </Link>
           <Crosshair className="text-premium-accent text-xl" />
-          <h1 className="text-2xl font-bold text-white">AI Detection</h1>
+          <h1 className="text-2xl font-bold dash-text-primary">AI Detection</h1>
         </div>
-        <p className="text-sm text-neutral-300 leading-relaxed mb-4">
+        <p className="text-sm dash-text-body leading-relaxed mb-4">
           Choose a mode: video defect detection, DJI thermal analysis, or RGB image detection.
         </p>
         <div className="flex flex-wrap gap-2">
@@ -590,8 +591,8 @@ export default function AIDetection() {
               onClick={() => setDetectionMode(id)}
               className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors ${
                 detectionMode === id
-                  ? "border-premium-accent bg-premium-accent/15 text-white shadow-glow"
-                  : "border-neutral-700 bg-premium-card/30 text-neutral-300 hover:border-neutral-500 hover:text-white"
+                  ? "border-premium-accent bg-premium-accent/15 dash-text-primary shadow-glow"
+                  : "border-[var(--dash-panel-border)] dash-text-body hover:border-neutral-500 hover:dash-text-primary"
               }`}
             >
               {label}
@@ -606,23 +607,23 @@ export default function AIDetection() {
 
       {detectionMode === "rgb" && (
         <>
-      <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
+      <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
-              <Crosshair className="text-premium-accent text-xl" />
+              <image className="text-premium-accent text-xl" />
               <div className="text-sm text-premium-accent uppercase tracking-wider">RGB Analysis</div>
             </div>
-            <div className="text-2xl font-bold text-white mb-2">Defect Detection Pipeline</div>
-            <div className="text-sm text-neutral-300 leading-relaxed">
-              Upload RGB images for AI-powered defect detection. The system uses YOLO + SAHI sliced inference to detect defects and display results in real time.
+            <div className="text-2xl font-bold dash-text-primary mb-2">Defect Detection Pipeline</div>
+            <div className="text-sm dash-text-body leading-relaxed">
+              Upload RGB Individual or bulk images for AI-powered defect detection. The system uses YOLO + SAHI sliced inference to detect defects and display results in real time.
             </div>
           </div>
           <div className="flex gap-2">
             {totalFiles > 0 && !processing && (
               <button
                 onClick={clearAll}
-                className="rounded-xl glass border border-neutral-700 text-white px-4 py-2 text-sm font-semibold hover:bg-premium-card-hover transition-colors flex items-center gap-2"
+                className="rounded-xl glass border border-[var(--dash-panel-border)] dash-text-primary px-4 py-2 text-sm font-semibold hover:bg-premium-card-hover transition-colors flex items-center gap-2"
               >
                 <Trash2 size={16} />
                 Clear All
@@ -658,114 +659,88 @@ export default function AIDetection() {
         </div>
       </div>
 
-      {/* Upload + Config */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
-          <div className="flex items-center gap-2 mb-6">
+      <UploadPipelineStrip
+        variant="cyan"
+        title="Processing pipeline"
+        steps={[
+          "Image ingest",
+          "YOLO full-image",
+          "SAHI sliced inference",
+          "NMS merge",
+          "Annotation & thumbnails",
+        ]}
+      />
+
+      <div className="grid grid-cols-1 gap-6">
+        <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-6 shadow-premium">
+          <div className="mb-4 flex items-center gap-2">
             <Upload className="text-premium-accent text-xl" />
-            <div className="font-semibold text-white text-lg">Image Upload</div>
+            <h2 className="text-lg font-semibold dash-text-primary">Image Upload</h2>
           </div>
-          <div className="space-y-5">
-            {/* RGB */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Camera size={16} /> RGB Images
-                </div>
-                <span className="text-xs text-premium-danger font-medium">Required</span>
-              </div>
-              <div
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-                className={`rounded-xl border-2 border-dashed transition-all p-4 ${
-                  dragActive
-                    ? "border-premium-accent bg-premium-accent/10"
-                    : rgbFiles.length > 0
-                    ? "border-premium-success/50 bg-premium-success/5"
-                    : "border-neutral-700 bg-premium-card/30 hover:border-premium-accent/50"
-                }`}
-              >
-                {rgbFiles.length > 0 ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm text-premium-success">
-                      <CheckCircle2 size={16} />
-                      <span>{rgbFiles.length} RGB image(s) selected</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                      {rgbFiles.map(f => (
-                        <div key={f.id} className="relative group">
-                          <img src={f.preview} alt={f.file.name} className="w-16 h-16 object-cover rounded-lg border border-neutral-700" />
-                          {!processing && (
-                            <button
-                              onClick={() => removeFile(f.id)}
-                              className="absolute -top-1 -right-1 bg-red-500 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <X size={10} className="text-white" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    <input type="file" accept="image/*" multiple onChange={e => { if (e.target.files?.length) addFiles(Array.from(e.target.files)); e.target.value = ""; }} className="hidden" id="rgb-add-more" />
-                    <label htmlFor="rgb-add-more" className="inline-block rounded-lg bg-premium-card border border-neutral-700 text-white px-3 py-1.5 text-xs font-semibold hover:bg-premium-card-hover cursor-pointer transition-colors">
-                      + Add More
-                    </label>
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <Camera className="text-3xl text-neutral-500 mx-auto mb-2" />
-                    <div className="text-sm text-neutral-300 mb-2">Drop RGB images here or click to browse</div>
-                    <input type="file" accept="image/*" multiple onChange={e => { if (e.target.files?.length) addFiles(Array.from(e.target.files)); e.target.value = ""; }} className="hidden" id="rgb-upload" />
-                    <label htmlFor="rgb-upload" className="inline-block rounded-xl bg-premium-card border border-neutral-700 text-white px-4 py-2 text-sm font-semibold hover:bg-premium-card-hover cursor-pointer transition-colors">
-                      Select RGB Images
-                    </label>
-                  </div>
-                )}
-              </div>
-              <div className="mt-2 text-xs text-neutral-400">High-resolution RGB images from drone or camera system</div>
+          <MediaUploadBox
+            accent="cyan"
+            dragActive={dragActive}
+            disabled={processing}
+            hasFiles={rgbFiles.length > 0}
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            inputId="rgb-upload"
+            accept="image/*"
+            multiple
+            onInputChange={(e) => {
+              if (e.target.files?.length) addFiles(Array.from(e.target.files));
+              e.target.value = "";
+            }}
+            addMoreInputId="rgb-add-more"
+            onAddMoreChange={(e) => {
+              if (e.target.files?.length) addFiles(Array.from(e.target.files));
+              e.target.value = "";
+            }}
+            emptyIcon={<Camera className="mx-auto text-3xl dash-text-subtle" />}
+            emptyDescription="Drop RGB images here or click to browse"
+            primaryButtonLabel="Select RGB Images"
+            footerNote="High-resolution RGB images from drone or camera system"
+          >
+            <div className="flex items-center gap-2 text-sm text-premium-success">
+              <CheckCircle2 size={16} />
+              <span>{rgbFiles.length} RGB image(s) selected</span>
             </div>
-
-            {totalFiles > 0 && !processing && (
-              <div className="rounded-xl bg-premium-card/50 border border-neutral-700 p-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-white font-medium">{totalFiles} file{totalFiles !== 1 ? "s" : ""} ready</div>
-                  <div className="flex gap-3 text-xs text-neutral-400">
-                    {rgbFiles.length > 0 && <span className="text-premium-accent">{rgbFiles.length} RGB</span>}
-                  </div>
+            <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto">
+              {rgbFiles.map((f) => (
+                <div key={f.id} className="group relative">
+                  <img
+                    src={f.preview}
+                    alt={f.file.name}
+                    className="h-16 w-16 rounded-lg border border-[var(--dash-panel-border)] object-cover"
+                  />
+                  {!processing && (
+                    <button
+                      type="button"
+                      onClick={() => removeFile(f.id)}
+                      className="absolute -right-1 -top-1 rounded-full bg-red-500 p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <X size={10} className="text-white" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </MediaUploadBox>
+          {totalFiles > 0 && !processing && (
+            <div className="mt-3 rounded-xl border border-[var(--dash-panel-border)] p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium dash-text-primary">
+                  {totalFiles} file{totalFiles !== 1 ? "s" : ""} ready
+                </div>
+                <div className="flex gap-3 text-xs dash-text-muted">
+                  {rgbFiles.length > 0 && <span className="text-premium-accent">{rgbFiles.length} RGB</span>}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-
-        {/* Config */}
-        <div className="glass rounded-2xl border border-neutral-800 p-6 shadow-premium">
-  <div className="rounded-xl border border-neutral-700 bg-premium-card/30 p-4">
-    <div className="flex items-center gap-2 mb-3">
-      <ChevronLeft className="text-premium-accent rotate-180" size={16} />
-      <div className="text-sm font-semibold text-white">Processing Pipeline</div>
-    </div>
-
-    <div className="space-y-2">
-      {[
-        "Frame extraction",
-        "YOLO full-image inference",
-        "SAHI sliced inference",
-        "NMS merge",
-        "Annotation & thumbnail",
-      ].map((step, i) => (
-        <div key={i} className="flex items-center gap-3">
-          <div className="w-6 h-6 rounded-full bg-neutral-700 flex items-center justify-center text-xs font-bold text-neutral-400">
-            {i + 1}
-          </div>
-          <span className="text-xs text-neutral-300">{step}</span>
-        </div>
-      ))}
-    </div>
-  </div>
-</div>
       </div>
 
       {/* Progress */}
@@ -774,20 +749,20 @@ export default function AIDetection() {
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <Clock className="text-premium-accent animate-spin" size={18} />
-              <span className="font-semibold text-white">Processing Images</span>
+              <span className="font-semibold dash-text-primary">Processing Images</span>
             </div>
-            <span className="text-sm text-neutral-300">
+            <span className="text-sm dash-text-body">
               {batchProgress.total > 0 ? `${Math.round((batchProgress.completed / batchProgress.total) * 100)}%` : "—"}
             </span>
           </div>
-          <div className="w-full bg-neutral-800 rounded-full h-2.5 overflow-hidden">
+          <div className="w-full rounded-full h-2.5 overflow-hidden" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
             {batchProgress.total > 0 ? (
               <div className="bg-gradient-accent h-full transition-all duration-300 rounded-full" style={{ width: `${(batchProgress.completed / batchProgress.total) * 100}%` }} />
             ) : (
               <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-gradient-to-r from-transparent via-cyan-500/70 to-transparent" />
             )}
           </div>
-          <div className="mt-2 text-xs text-neutral-400">
+          <div className="mt-2 text-xs dash-text-muted">
             {batchProgress.total > 0 ? `${batchProgress.completed} of ${batchProgress.total} files completed` : "Uploading files..."}
           </div>
         </div>
@@ -797,11 +772,11 @@ export default function AIDetection() {
       {cards.size > 0 && (
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <h2 className="text-lg font-semibold dash-text-primary flex items-center gap-2">
               <Layers className="text-premium-accent" size={20} />
               Detection Results ({cards.size})
             </h2>
-            <div className="flex gap-3 text-xs text-neutral-400">
+            <div className="flex gap-3 text-xs dash-text-muted">
               {(() => {
                 const completed = Array.from(cards.values()).filter(c => c.status === "complete").length;
                 const errors = Array.from(cards.values()).filter(c => c.status === "error").length;
@@ -828,10 +803,10 @@ export default function AIDetection() {
                     ? "border-red-500/30 bg-red-500/5"
                     : card.status === "processing"
                     ? "border-premium-accent/50 bg-premium-accent/5"
-                    : "border-neutral-800 bg-premium-card/30"
+                    : "border-[var(--dash-panel-border)] bg-premium-card/30"
                 }`}
               >
-                <div className="relative aspect-square bg-neutral-800 overflow-hidden">
+                <div className="relative aspect-square overflow-hidden" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
                   {card.status === "complete" && card.thumbUrl ? (
                     <img src={card.thumbUrl} alt={card.filename} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" loading="lazy" />
                   ) : card.localPreview ? (
@@ -842,12 +817,12 @@ export default function AIDetection() {
 
                   {card.status !== "complete" && card.status !== "error" && (
                     <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-2">
-                      {card.status === "processing" ? <Clock className="text-premium-accent animate-spin" size={24} /> : <Clock className="text-neutral-400" size={24} />}
-                      <span className="text-[10px] text-white font-medium px-2 text-center">
+                      {card.status === "processing" ? <Clock className="text-premium-accent animate-spin" size={24} /> : <Clock className="dash-text-muted" size={24} />}
+                      <span className="text-[10px] dash-text-primary font-medium px-2 text-center">
                         {card.status === "processing" ? "Processing analysis" : card.progressLabel}
                       </span>
                       {card.status === "processing" && (
-                        <div className="w-3/4 bg-neutral-700 rounded-full h-1 overflow-hidden">
+                        <div className="w-3/4 rounded-full h-1 overflow-hidden" style={{ backgroundColor: "var(--dash-inset-border)" }}>
                           {card.progress > 0 ? (
                             <div className="bg-cyan-500 h-full rounded-full transition-all duration-300" style={{ width: `${card.progress}%` }} />
                           ) : (
@@ -885,16 +860,16 @@ export default function AIDetection() {
                 </div>
 
                 <div className="p-2">
-                  <p className="text-[11px] truncate font-medium text-white" title={card.filename}>{card.filename}</p>
+                  <p className="text-[11px] truncate font-medium dash-text-primary" title={card.filename}>{card.filename}</p>
                   {card.status === "complete" && card.stats && card.stats.avg_confidence > 0 && (
                     <div className="mt-1 flex items-center gap-1">
-                      <div className="flex-1 bg-neutral-700 rounded-full h-1.5 overflow-hidden">
+                      <div className="flex-1 rounded-full h-1.5 overflow-hidden" style={{ backgroundColor: "var(--dash-inset-border)" }}>
                         <div
                           className={`h-full rounded-full ${card.stats.avg_confidence >= 0.7 ? "bg-green-500" : card.stats.avg_confidence >= 0.4 ? "bg-yellow-500" : "bg-red-500"}`}
                           style={{ width: `${Math.round(card.stats.avg_confidence * 100)}%` }}
                         />
                       </div>
-                      <span className="text-[10px] font-mono text-neutral-400">{Math.round(card.stats.avg_confidence * 100)}%</span>
+                      <span className="text-[10px] font-Poppins dash-text-muted">{Math.round(card.stats.avg_confidence * 100)}%</span>
                     </div>
                   )}
                 </div>
@@ -922,16 +897,16 @@ export default function AIDetection() {
           const isRunning = done < total;
 
           return (
-            <div className="glass rounded-2xl border border-neutral-800 p-5 shadow-premium">
+            <div className="glass rounded-2xl border border-[var(--dash-panel-border)] p-5 shadow-premium">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Layers className="text-premium-accent" size={18} />
-                  <span className="font-semibold text-white text-sm">Processing analysis</span>
+                  <span className="font-semibold dash-text-primary text-sm">Processing analysis</span>
                 </div>
-                <span className="text-xs font-mono text-premium-accent">{pct}%</span>
+                <span className="text-xs font-Poppins text-premium-accent">{pct}%</span>
               </div>
 
-              <div className="w-full bg-neutral-800 rounded-full h-3 overflow-hidden mb-3">
+              <div className="w-full rounded-full h-3 overflow-hidden mb-3" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
                 <div
                   className={`h-full rounded-full transition-all duration-500 ${
                     isRunning
@@ -944,7 +919,7 @@ export default function AIDetection() {
                 />
               </div>
 
-              <div className="flex items-center justify-between text-xs text-neutral-400">
+              <div className="flex items-center justify-between text-xs dash-text-muted">
                 <div className="flex gap-4">
                   <span>{done} / {total} images</span>
                   {totalDefects > 0 && (
@@ -978,17 +953,17 @@ export default function AIDetection() {
       )}
 
       {cards.size === 0 && totalFiles === 0 && (
-        <div className="glass rounded-2xl border-2 border-dashed border-neutral-700 p-12 text-center shadow-premium">
-          <Crosshair className="text-4xl text-neutral-500 mx-auto mb-4" />
-          <div className="text-neutral-300 text-lg mb-2">No images uploaded yet</div>
-          <div className="text-neutral-500 text-sm">Upload RGB images above to start defect detection</div>
+        <div className="glass rounded-2xl border-2 border-dashed border-[var(--dash-panel-border)] p-12 text-center shadow-premium">
+          <Crosshair className="text-4xl dash-text-subtle mx-auto mb-4" />
+          <div className="dash-text-body text-lg mb-2">No images uploaded yet</div>
+          <div className="dash-text-subtle text-sm">Upload RGB images above to start defect detection</div>
         </div>
       )}
 
       {/* Preview Modal */}
       {previewId && previewCard && (
-        <div className="fixed inset-0 z-50 bg-black/85 flex" onClick={() => setPreviewId(null)}>
-          <button onClick={() => setPreviewId(null)} className="absolute top-4 right-4 z-10 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700 transition-colors">
+        <div className="fixed inset-0 z-50 bg-[var(--dash-overlay-scrim)] flex" onClick={() => setPreviewId(null)}>
+          <button onClick={() => setPreviewId(null)} className="absolute top-4 right-4 z-10 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
             <X size={24} />
           </button>
 
@@ -996,13 +971,15 @@ export default function AIDetection() {
             <>
               <button
                 onClick={e => { e.stopPropagation(); navigatePreview(-1); }}
-                className="absolute left-4 top-1/2 -translate-y-1/2 z-10 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700 transition-colors"
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-10 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors"
+                style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronLeft size={24} />
               </button>
               <button
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute right-[340px] top-1/2 -translate-y-1/2 z-10 rounded-full bg-neutral-800/90 text-white p-2 hover:bg-neutral-700 transition-colors"
+                className="absolute right-[340px] top-1/2 -translate-y-1/2 z-10 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors"
+                style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronRight size={24} />
               </button>
@@ -1012,13 +989,13 @@ export default function AIDetection() {
           {/* Image */}
           <div className="flex-1 flex items-center justify-center overflow-auto p-8" onClick={e => e.stopPropagation()}>
             <div className="relative max-w-full max-h-full">
-              <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-lg bg-neutral-900/90 border border-neutral-700">
-                <button onClick={() => setModalZoom(z => Math.max(0.25, z - 0.25))} className="p-1.5 text-white hover:bg-neutral-700 rounded-l-lg"><ZoomOut size={16} /></button>
-                <span className="px-2 text-xs text-neutral-300 min-w-[3rem] text-center">{Math.round(modalZoom * 100)}%</span>
-                <button onClick={() => setModalZoom(z => Math.min(3, z + 0.25))} className="p-1.5 text-white hover:bg-neutral-700"><ZoomIn size={16} /></button>
-                <button onClick={() => setModalZoom(1)} className="p-1.5 text-white hover:bg-neutral-700 rounded-r-lg border-l border-neutral-700"><RotateCcw size={14} /></button>
+              <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-lg border border-[var(--dash-panel-border)]" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
+                <button onClick={() => setModalZoom(z => Math.max(0.25, z - 0.25))} className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-l-lg"><ZoomOut size={16} /></button>
+                <span className="px-2 text-xs dash-text-body min-w-[3rem] text-center">{Math.round(modalZoom * 100)}%</span>
+                <button onClick={() => setModalZoom(z => Math.min(3, z + 0.25))} className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)]"><ZoomIn size={16} /></button>
+                <button onClick={() => setModalZoom(1)} className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-r-lg border-l border-[var(--dash-panel-border)]"><RotateCcw size={14} /></button>
               </div>
-              <div className="absolute top-2 right-2 z-10 rounded-lg bg-neutral-900/90 border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300">
+              <div className="absolute top-2 right-2 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
                 {previewIndex + 1} / {completedCards.length}
               </div>
               <img
@@ -1032,32 +1009,32 @@ export default function AIDetection() {
           </div>
 
           {/* Detail Panel */}
-          <div className="w-[320px] bg-[#0f1419] border-l border-neutral-800 overflow-y-auto flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b border-neutral-800">
-              <div className="text-lg font-bold text-white truncate" title={previewCard.filename}>{previewCard.filename}</div>
+          <div className="w-[320px] border-l border-[var(--dash-panel-border)] overflow-y-auto flex flex-col" onClick={e => e.stopPropagation()} style={{ backgroundColor: "var(--dash-modal-aside)" }}>
+            <div className="p-4 border-b border-[var(--dash-panel-border)]">
+              <div className="text-lg font-bold dash-text-primary truncate" title={previewCard.filename}>{previewCard.filename}</div>
               <div className="flex items-center gap-2 mt-2">
                 <span className="px-2 py-0.5 rounded text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/50">
                   RGB
                 </span>
                 {previewCard.stats?.processing_time_ms && (
-                  <span className="text-xs text-neutral-400">{(previewCard.stats.processing_time_ms / 1000).toFixed(1)}s</span>
+                  <span className="text-xs dash-text-muted">{(previewCard.stats.processing_time_ms / 1000).toFixed(1)}s</span>
                 )}
               </div>
             </div>
 
             {previewCard.stats && (
-              <div className="p-4 border-b border-neutral-800 grid grid-cols-2 gap-3">
+              <div className="p-4 border-b border-[var(--dash-panel-border)] grid grid-cols-2 gap-3">
                 <div>
-                  <div className="text-xs text-neutral-400">Total Defects</div>
-                  <div className="text-xl font-bold text-white">{previewCard.stats.total_defects}</div>
+                  <div className="text-xs dash-text-muted">Total Defects</div>
+                  <div className="text-xl font-bold dash-text-primary">{previewCard.stats.total_defects}</div>
                 </div>
               </div>
             )}
 
-            <div className="p-4 border-b border-neutral-800">
+            {/* <div className="p-4 border-b border-[var(--dash-panel-border)]">
               <div className="flex items-center justify-between mb-2">
-                <div className="text-xs font-medium text-neutral-400">Confidence Filter</div>
-                <span className="text-xs font-mono text-premium-accent">&ge; {Math.round(previewConfFilter * 100)}%</span>
+                <div className="text-xs font-medium dash-text-muted">Confidence Filter</div>
+                <span className="text-xs font-Poppins text-premium-accent">&ge; {Math.round(previewConfFilter * 100)}%</span>
               </div>
               <input
                 type="range" min="0" max="95" step="5"
@@ -1065,14 +1042,14 @@ export default function AIDetection() {
                 onChange={e => setPreviewConfFilter(parseInt(e.target.value) / 100)}
                 className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-neutral-700 accent-cyan-500"
               />
-              <div className="text-xs text-neutral-500 mt-1">
+              <div className="text-xs dash-text-subtle mt-1">
                 Showing {previewDetections.length} of {previewCard.detections.length} detections
               </div>
-            </div>
+            </div> */}
 
             <div className="flex-1 overflow-y-auto p-4">
               {previewDetections.length === 0 ? (
-                <div className="text-center py-8 text-neutral-500 text-sm">
+                <div className="text-center py-8 dash-text-subtle text-sm">
                   {previewCard.detections.length === 0
                     ? "No defects detected"
                     : "No detections above threshold"}
@@ -1082,16 +1059,16 @@ export default function AIDetection() {
                   {previewDetections.map((det, idx) => (
                     <div
                       key={idx}
-                      className="rounded-lg border border-neutral-700 bg-premium-card/50 p-3"
+                      className="rounded-lg border border-[var(--dash-panel-border)] p-3"
                     >
                       <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-sm font-semibold text-white">
+                        <span className="text-sm font-semibold dash-text-primary">
                           {formatDetectionLabel(displayClassName(det.class_name))}
                         </span>
                       </div>
 
                       {det.source && (
-                        <div className="text-[10px] text-neutral-500 mt-1">
+                        <div className="text-[10px] dash-text-subtle mt-1">
                           Source: {det.source === "sahi" ? "SAHI Slice" : "Full Image"}
                         </div>
                       )}
