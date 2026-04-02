@@ -61,6 +61,11 @@ function onMainlandNotSea(lat: number, lng: number): boolean {
   return pointInPolygon(lat, lng, AZ_MAINLAND) && !pointInPolygon(lat, lng, CASPIAN_OPEN_WATER);
 }
 
+/** Same rules as Python `map_geo._on_mainland_not_sea` — use before trusting API / EXIF GPS on the map. */
+export function isGpsOnAzerbaijanMainland(lat: number, lng: number): boolean {
+  return onMainlandNotSea(lat, lng);
+}
+
 function bbox(ring: ReadonlyArray<readonly [number, number]>): { latMin: number; latMax: number; lngMin: number; lngMax: number } {
   let latMin = Infinity;
   let latMax = -Infinity;

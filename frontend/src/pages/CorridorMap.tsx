@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { getRuns, getRun, listOverlays, resolveArtifactUrl, API_BASE, type Run } from "../api/api";
-import { azerbaijanDotFromBatchId } from "../geo/azerbaijanMainland";
+import { azerbaijanDotFromBatchId, isGpsOnAzerbaijanMainland } from "../geo/azerbaijanMainland";
 import { toast } from "../components/Toast";
 import {
   Map,
@@ -36,6 +36,7 @@ function isValidGps(lat: number, lng: number): boolean {
 function getRunGpsFromApi(run: Run): { lat: number; lng: number } | null {
   const g = run.gps ?? (run.metadata as { gps?: { lat: number; lng: number } } | undefined)?.gps;
   if (!g || !isValidGps(g.lat, g.lng)) return null;
+  if (!isGpsOnAzerbaijanMainland(g.lat, g.lng)) return null;
   return { lat: g.lat, lng: g.lng };
 }
 

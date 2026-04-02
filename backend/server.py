@@ -1382,6 +1382,11 @@ def _build_thermal_run_entry(jid: str, job: dict) -> dict:
     from datetime import datetime, timezone
 
     results_by_fid = {}
+    rb = job.get("results_by_file_id")
+    if isinstance(rb, dict):
+        for fid, r in rb.items():
+            if isinstance(r, dict) and fid:
+                results_by_fid[str(fid)] = r
     for r in job.get("results") or []:
         if isinstance(r, dict) and r.get("file_id"):
             results_by_fid[r["file_id"]] = r

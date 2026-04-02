@@ -199,7 +199,7 @@ const RECENT_UPLOADS_CAROUSEL_MAX = 8;
 
 const HOW_IT_WORKS_SLIDES = [
   {
-    imageSrc: "/banner-powerline.jpg",
+    imageSrc: "/carousel/slide-1.png",
     alt: "Digital and field power line inspection",
     title: "Blueprint to live inspection",
     meta: "Digital twin · corridor intelligence",
@@ -211,7 +211,7 @@ const HOW_IT_WORKS_SLIDES = [
     ],
   },
   {
-    imageSrc: "/Drone_Powerline_Inspection_articleheaderimage.jpg",
+    imageSrc: "/carousel/slide-2.png",
     alt: "Drone inspecting transmission lines",
     title: "Single image inspection",
     meta: "RGB workflow · AI-assisted review",
@@ -223,7 +223,7 @@ const HOW_IT_WORKS_SLIDES = [
     ],
   },
   {
-    imageSrc: "/images.jpg",
+    imageSrc: "/carousel/slide-3.jpeg",
     alt: "Power infrastructure inspection",
     title: "Batch & thermal analysis",
     meta: "Scale processing · thermal insights",
@@ -362,28 +362,101 @@ type StatusDistRow = {
   pct: number;
 };
 
+type StatusDonutChartTokens = {
+  pieCell: string;
+  pieStroke: string;
+  statusDonutConnector: string;
+  ttBg: string;
+  ttBorderCyan: string;
+  ttShadow: string;
+  ttLabel: string;
+  ttItem: string;
+};
+
+function StatusDonutChart({
+  pieData,
+  chart,
+  reduceMotion,
+  innerRadius,
+  outerRadius,
+  center,
+}: {
+  pieData: StatusDistRow[];
+  chart: StatusDonutChartTokens;
+  reduceMotion: boolean;
+  innerRadius: number;
+  outerRadius: number;
+  center: React.ReactNode;
+}) {
+  return (
+    <>
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={pieData}
+            cx="50%"
+            cy="50%"
+            innerRadius={innerRadius}
+            outerRadius={outerRadius}
+            paddingAngle={2}
+            dataKey="value"
+            nameKey="name"
+            strokeWidth={1}
+            stroke={chart.pieCell}
+            startAngle={90}
+            endAngle={-270}
+            isAnimationActive={!reduceMotion}
+            animationDuration={780}
+            animationBegin={100}
+            animationEasing="ease-out"
+          >
+            {pieData.map((entry) => (
+              <Cell key={entry.name} fill={entry.color} stroke={chart.pieCell} />
+            ))}
+          </Pie>
+          <Tooltip
+            contentStyle={{
+              backgroundColor: chart.ttBg,
+              border: `1px solid ${chart.ttBorderCyan}`,
+              borderRadius: "8px",
+              fontSize: "12px",
+              boxShadow: chart.ttShadow,
+            }}
+            labelStyle={{ color: chart.ttLabel }}
+            itemStyle={{ color: chart.ttItem }}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+        {center}
+      </div>
+    </>
+  );
+}
+
 function StatusDistributionInfographic({
   rows,
   pieData,
   total,
   chart,
+  reduceMotion,
 }: {
   rows: StatusDistRow[];
   pieData: StatusDistRow[];
   total: number;
-  chart: {
-    pieCell: string;
-    ttBg: string;
-    ttBorderCyan: string;
-    ttShadow: string;
-    ttLabel: string;
-    ttItem: string;
-  };
+  chart: StatusDonutChartTokens;
+  reduceMotion: boolean;
 }) {
   const leftCol = rows.slice(0, 2);
   const rightCol = rows.slice(2, 4);
+  const lineStroke = chart.statusDonutConnector;
 
-  const rowBlock = (row: StatusDistRow, side: "left" | "right") => {
+  const rowBlock = (row: StatusDistRow, side: "left" | "right", slotIndex: number) => {
+    const tipY = slotIndex === 0 ? 11 : 25;
+    const elbowD =
+      side === "left"
+        ? `M 56 ${tipY} L 52 ${tipY} L 52 18 L 0 18`
+        : `M 0 ${tipY} L 4 ${tipY} L 4 18 L 56 18`;
     const textBlock = (
       <div
         className={`min-w-0 flex-1 max-w-[11rem] xl:max-w-[13rem] ${side === "left" ? "text-right" : "text-left"}`}
@@ -403,18 +476,42 @@ function StatusDistributionInfographic({
         aria-hidden
       />
     );
+    const connector = (
+      <svg className="h-9 w-11 xl:w-[3.25rem] shrink-0 overflow-visible" viewBox="0 0 56 36" aria-hidden>
+        <motion.path
+          d={elbowD}
+          fill="none"
+          stroke={lineStroke}
+          strokeWidth={1.35}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          initial={{ pathLength: reduceMotion ? 1 : 0, opacity: reduceMotion ? 0.9 : 0.35 }}
+          animate={{ pathLength: 1, opacity: 0.9 }}
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : {
+                  pathLength: { duration: 0.68, ease: [0.22, 1, 0.36, 1], delay: 0.06 * slotIndex },
+                  opacity: { duration: 0.35, delay: 0.06 * slotIndex },
+                }
+          }
+        />
+      </svg>
+    );
     return (
       <div
         key={row.name}
-        className={`flex items-center gap-4 w-full ${side === "left" ? "flex-row justify-end" : "flex-row justify-start"}`}
+        className={`flex items-center gap-2 w-full ${side === "left" ? "flex-row justify-end" : "flex-row justify-start"}`}
       >
         {side === "left" ? (
           <>
             {textBlock}
             {swatch}
+            <div className="hidden lg:block">{connector}</div>
           </>
         ) : (
           <>
+            <div className="hidden lg:block">{connector}</div>
             {swatch}
             {textBlock}
           </>
@@ -429,50 +526,26 @@ function StatusDistributionInfographic({
       <div className="flex flex-col items-stretch gap-5 lg:hidden">
         <div className="relative mx-auto flex h-[192px] w-[192px] shrink-0 items-center justify-center">
           {pieData.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={56}
-                    outerRadius={78}
-                    paddingAngle={2}
-                    dataKey="value"
-                    nameKey="name"
-                    strokeWidth={1}
-                    stroke={chart.pieCell}
+            <StatusDonutChart
+              pieData={pieData}
+              chart={chart}
+              reduceMotion={reduceMotion}
+              innerRadius={56}
+              outerRadius={78}
+              center={
+                <>
+                  <span
+                    className="text-3xl font-bold tabular-nums dash-text-primary tracking-tight"
+                    style={{ fontFamily: '"Outfit", sans-serif' }}
                   >
-                    {pieData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} stroke={chart.pieCell} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: chart.ttBg,
-                      border: `1px solid ${chart.ttBorderCyan}`,
-                      borderRadius: "8px",
-                      fontSize: "12px",
-                      boxShadow: chart.ttShadow,
-                    }}
-                    labelStyle={{ color: chart.ttLabel }}
-                    itemStyle={{ color: chart.ttItem }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span
-                  className="text-3xl font-bold tabular-nums dash-text-primary tracking-tight"
-                  style={{ fontFamily: '"Outfit", sans-serif' }}
-                >
-                  {total}
-                </span>
-                <span className="text-[10px] font-semibold uppercase tracking-wider dash-text-muted mt-0.5">
-                  Total uploads
-                </span>
-              </div>
-            </>
+                    {total}
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider dash-text-muted mt-0.5">
+                    TOTAL UPLOADS
+                  </span>
+                </>
+              }
+            />
           ) : null}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -502,60 +575,36 @@ function StatusDistributionInfographic({
       {/* Desktop: labels separated from center donut (infographic spacing) */}
       <div className="hidden lg:flex lg:flex-row lg:items-center lg:justify-between lg:gap-4 min-h-[220px] px-1">
         <div className="flex flex-col justify-center gap-6 flex-1 min-w-0 max-w-[200px] xl:max-w-[220px]">
-          {leftCol.map((r) => rowBlock(r, "left"))}
+          {leftCol.map((r, i) => rowBlock(r, "left", i))}
         </div>
 
         <div className="relative flex h-[200px] w-[200px] xl:h-[220px] xl:w-[220px] shrink-0 items-center justify-center">
           {pieData.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={58}
-                    outerRadius={84}
-                    paddingAngle={2}
-                    dataKey="value"
-                    nameKey="name"
-                    strokeWidth={1}
-                    stroke={chart.pieCell}
+            <StatusDonutChart
+              pieData={pieData}
+              chart={chart}
+              reduceMotion={reduceMotion}
+              innerRadius={58}
+              outerRadius={84}
+              center={
+                <>
+                  <span
+                    className="text-3xl xl:text-[2rem] font-bold tabular-nums dash-text-primary tracking-tight"
+                    style={{ fontFamily: '"Outfit", sans-serif' }}
                   >
-                    {pieData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} stroke={chart.pieCell} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: chart.ttBg,
-                      border: `1px solid ${chart.ttBorderCyan}`,
-                      borderRadius: "8px",
-                      fontSize: "12px",
-                      boxShadow: chart.ttShadow,
-                    }}
-                    labelStyle={{ color: chart.ttLabel }}
-                    itemStyle={{ color: chart.ttItem }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span
-                  className="text-3xl xl:text-[2rem] font-bold tabular-nums dash-text-primary tracking-tight"
-                  style={{ fontFamily: '"Outfit", sans-serif' }}
-                >
-                  {total}
-                </span>
-                <span className="text-[10px] font-semibold uppercase tracking-wider dash-text-muted mt-0.5 text-center px-2">
-                  Total uploads
-                </span>
-              </div>
-            </>
+                    {total}
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider dash-text-muted mt-0.5 text-center px-2">
+                    TOTAL UPLOADS
+                  </span>
+                </>
+              }
+            />
           ) : null}
         </div>
 
         <div className="flex flex-col justify-center gap-6 flex-1 min-w-0 max-w-[200px] xl:max-w-[220px]">
-          {rightCol.map((r) => rowBlock(r, "right"))}
+          {rightCol.map((r, i) => rowBlock(r, "right", i))}
         </div>
       </div>
     </div>
@@ -622,6 +671,7 @@ export default function Dashboard() {
       cursorAmber: L ? "rgba(249, 115, 22, 0.18)" : "rgba(251, 146, 60, 0.14)",
       pieLabel: L ? "rgba(15,23,42,0.94)" : "rgba(226,232,240,0.92)",
       pieStroke: L ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.55)",
+      statusDonutConnector: L ? "rgba(15, 23, 42, 0.5)" : "rgba(248, 250, 252, 0.88)",
       pieCell: L ? "rgba(100, 116, 139, 0.18)" : "rgba(148, 163, 184, 0.2)",
       barStrokeCyan: L ? "rgba(13, 148, 136, 0.35)" : "rgba(45, 212, 191, 0.45)",
       barStrokeAmber: L ? "rgba(234, 88, 12, 0.35)" : "rgba(251, 146, 60, 0.4)",
@@ -1354,42 +1404,35 @@ export default function Dashboard() {
                   initial={false}
                   animate={{ opacity: currentSlide === index ? 1 : 0 }}
                   transition={{ duration: 0.35, ease: "easeOut" }}
-                  className={`absolute inset-0 flex min-h-0 flex-col gap-3 p-2.5 sm:gap-4 sm:p-3 md:flex-row md:items-stretch md:gap-6 md:min-h-[240px] lg:min-h-[260px] ${
+                  className={`absolute inset-0 flex min-h-[220px] flex-col sm:min-h-[240px] md:min-h-[260px] ${
                     currentSlide === index ? "z-[1]" : "z-0 pointer-events-none"
                   }`}
                 >
-                  <div className="flex w-full shrink-0 flex-col md:h-full md:w-[36%] md:max-w-md">
-                    <div className="flex min-h-[152px] flex-1 flex-col sm:min-h-[168px] md:min-h-0 md:h-full">
-                      <div className="relative min-h-[152px] flex-1 overflow-hidden rounded-xl bg-black/20 sm:min-h-[168px] md:min-h-[208px] md:h-full">
-                        <img
-                          src={card.imageSrc}
-                          alt={card.alt}
-                          className="absolute inset-0 h-full w-full object-cover object-bottom"
-                          loading={index === 0 ? "eager" : "lazy"}
-                        />
-                        <div
-                          className="pointer-events-none absolute inset-0 rounded-xl opacity-40"
-                          style={{
-                            boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.1)",
-                          }}
-                        />
-                      </div>
+                  <img
+                    src={card.imageSrc}
+                    alt={card.alt}
+                    className="pointer-events-none absolute inset-0 z-0 h-full w-full min-h-full min-w-full object-cover object-center"
+                    loading={index === 0 ? "eager" : "lazy"}
+                  />
+                  <div
+                    className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-r from-black/25 via-black/40 to-black/72 sm:via-black/45 sm:to-black/78"
+                    aria-hidden
+                  />
+                  <div className="relative z-[2] flex min-h-0 w-full flex-1 flex-col justify-center px-4 py-4 pr-[3.25rem] sm:px-6 sm:pr-16 md:pr-20 lg:pr-24">
+                    <div className="flex w-full max-w-[min(100%,26rem)] flex-col gap-2 rounded-2xl border border-white/20 bg-black/35 px-4 py-4 text-white shadow-[0_8px_32px_rgba(0,0,0,0.18)] backdrop-blur-xl backdrop-saturate-150 sm:px-5 sm:py-5 md:ml-auto">
+                      <h3 className="text-lg font-bold leading-tight tracking-tight text-white sm:text-xl md:text-2xl lg:text-[1.65rem]">
+                        {card.title}
+                      </h3>
+                      <p className="text-xs font-medium text-white/75 sm:text-sm">{card.meta}</p>
+                      <ul className="mt-1 space-y-2 text-left text-xs leading-snug text-white/90 sm:text-sm md:space-y-2.5">
+                        {card.steps.map((line, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className={stepAccent}>{i + 1}.</span>
+                            <span>{line}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-                  </div>
-
-                  <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 py-1 pr-[3.25rem] text-white md:pl-1 md:pr-20">
-                    <h3 className="text-lg font-bold leading-tight tracking-tight text-white sm:text-xl md:text-2xl lg:text-[1.65rem]">
-                      {card.title}
-                    </h3>
-                    <p className="text-xs font-medium text-white/75 sm:text-sm">{card.meta}</p>
-                    <ul className="mt-1 space-y-2 text-left text-xs leading-snug text-white/90 sm:text-sm md:space-y-2.5">
-                      {card.steps.map((line, i) => (
-                        <li key={i} className="flex items-start gap-2">
-                          <span className={stepAccent}>{i + 1}.</span>
-                          <span>{line}</span>
-                        </li>
-                      ))}
-                    </ul>
                   </div>
                 </motion.div>
               );
@@ -1858,6 +1901,10 @@ export default function Dashboard() {
                       radius={[10, 10, 6, 6]}
                       stroke={chart.barStrokeCyan}
                       strokeWidth={1}
+                      isAnimationActive={!reduceMotion}
+                      animationDuration={720}
+                      animationBegin={80}
+                      animationEasing="ease-out"
                     />
                   </BarChart>
                 </ResponsiveContainer>
@@ -1877,6 +1924,7 @@ export default function Dashboard() {
                     pieData={statusDistribution.pieData}
                     total={statusDistribution.total}
                     chart={chart}
+                    reduceMotion={reduceMotion ?? false}
                   />
                 ) : (
                   <div className="flex min-h-[200px] items-center justify-center dash-text-subtle text-sm">
@@ -1939,6 +1987,10 @@ export default function Dashboard() {
                     radius={[10, 10, 6, 6]}
                     stroke={chart.barStrokeAmber}
                     strokeWidth={1}
+                    isAnimationActive={!reduceMotion}
+                    animationDuration={720}
+                    animationBegin={80}
+                    animationEasing="ease-out"
                   />
                 </BarChart>
               </ResponsiveContainer>
