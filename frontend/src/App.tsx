@@ -6,6 +6,24 @@ import Settings from "./pages/Settings";
 import AIDetection from "./pages/AIDetection";
 import ThermalImages from "./pages/ThermalImages";
 import LoadingSpinner from "./components/LoadingSpinner";
+import { IconDrone } from "@tabler/icons-react";
+
+function LiveDroneFeed() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 select-none">
+      <div
+        className="w-24 h-24 rounded-full flex items-center justify-center"
+        style={{ background: "linear-gradient(135deg, var(--accent-start, #0ea5e9), var(--accent-end, #6366f1))" }}
+      >
+        <IconDrone size={48} stroke={1.5} className="text-white" />
+      </div>
+      <h1 className="text-3xl font-bold dash-text-primary tracking-tight">Coming Soon</h1>
+      <p className="text-base dash-text-secondary max-w-md text-center leading-relaxed">
+        Live Drone Data Feed is under development. Real-time aerial monitoring and streaming analytics will be available here soon.
+      </p>
+    </div>
+  );
+}
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Runs = lazy(() => import("./pages/Runs"));
@@ -40,6 +58,7 @@ export default function App() {
         <Route path="/map" element={<LazyRoute><CorridorMap /></LazyRoute>} />
         <Route path="/review-queue" element={<LazyRoute><ReviewQueue /></LazyRoute>} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/live-drone-feed" element={<LiveDroneFeed />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Layout>

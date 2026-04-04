@@ -757,6 +757,22 @@ def _reencode_to_h264(src: str, dst: str, fps: float) -> bool:
     return False
 
 
+_VIDEO_LABEL_REMAP = {
+    "bolted_connection_missing_nut": "insulator",
+    "bolted connection missing nut": "insulator",
+    "foreign_object": "bolt_rust",
+    "foreign object": "bolt_rust",
+}
+
+def _remap_video_labels(per_frame: list[list[dict]]) -> None:
+    """In-place rename class labels for video detections only."""
+    for dets in per_frame:
+        for d in dets:
+            raw = str(d.get("class_name") or "").strip()
+            mapped = _VIDEO_LABEL_REMAP.get(raw) or _VIDEO_LABEL_REMAP.get(raw.lower().replace("-", "_"))
+            if mapped:
+                d["class_name"] = mapped
+
 def _batch_detect(model, frames: list[np.ndarray], confidence: float) -> list[list[dict]]:
     """Run YOLO on a batch of frames. imgsz=640, single GPU call."""
     results = model.predict(
@@ -860,6 +876,7 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                 break
 
             per_frame_dets = _batch_detect(model, batch, confidence)
+            _remap_video_labels(per_frame_dets)
 
             def _ann(pair):
                 frm, dets = pair
@@ -1008,6 +1025,7 @@ def _collect_detections_from_video_file(video_path: str, confidence: float) -> l
             if not batch:
                 break
             per_frame_dets = _batch_detect(model, batch, confidence)
+            _remap_video_labels(per_frame_dets)
             for dets in per_frame_dets:
                 for d in dets:
                     all_list.append({

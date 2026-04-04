@@ -149,20 +149,228 @@ async function fetchAsDataUrl(url: string): Promise<string | null> {
 
 function cropDataUrl(img: HTMLImageElement, bbox: number[]) {
   const [x1, y1, x2, y2] = bbox;
-  const ix1 = Math.max(0, Math.min(img.naturalWidth - 1, Math.floor(Math.min(x1, x2))));
-  const iy1 = Math.max(0, Math.min(img.naturalHeight - 1, Math.floor(Math.min(y1, y2))));
-  const ix2 = Math.max(ix1 + 1, Math.min(img.naturalWidth, Math.ceil(Math.max(x1, x2))));
-  const iy2 = Math.max(iy1 + 1, Math.min(img.naturalHeight, Math.ceil(Math.max(y1, y2))));
+  const pad = 20;
+  const ix1 = Math.max(0, Math.floor(Math.min(x1, x2)) - pad);
+  const iy1 = Math.max(0, Math.floor(Math.min(y1, y2)) - pad);
+  const ix2 = Math.min(img.naturalWidth, Math.ceil(Math.max(x1, x2)) + pad);
+  const iy2 = Math.min(img.naturalHeight, Math.ceil(Math.max(y1, y2)) + pad);
   const w = Math.max(1, ix2 - ix1);
   const h = Math.max(1, iy2 - iy1);
 
+  const minDim = 600;
+  const scale = Math.max(1, Math.ceil(minDim / Math.max(w, h)));
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = w * scale;
+  canvas.height = h * scale;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.drawImage(img, ix1, iy1, w, h, 0, 0, w, h);
-  return canvas.toDataURL("image/jpeg", 0.92);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, ix1, iy1, w, h, 0, 0, w * scale, h * scale);
+  return canvas.toDataURL("image/png");
+}
+
+function escapeReportHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function reportThermalUnitLabel(u: string): string {
+  if (u === "Fahrenheit") return "°F";
+  if (u === "Kelvin") return "K";
+  return "°C";
+}
+
+function reportStatRow(label: string, value: string): string {
+  return `<div class="flex justify-between gap-2 py-0.5 border-b border-gray-100 text-xs"><span class="text-gray-500 font-semibold">${escapeReportHtml(label)}</span><span class="text-gray-900 font-medium text-right">${escapeReportHtml(value)}</span></div>`;
+}
+
+function buildThermalTemperatureStatsHtml(stats: ThermalStats | null | undefined, unit: string): string {
+  const u = reportThermalUnitLabel(unit);
+  const fmt = (n: number | null | undefined, digits = 2) =>
+    n != null && Number.isFinite(n) ? n.toFixed(digits) : "—";
+  if (!stats) return `<div class="text-xs text-gray-500">No temperature statistics.</div>`;
+  const range =
+    stats.max_c != null && stats.min_c != null && Number.isFinite(stats.max_c) && Number.isFinite(stats.min_c)
+      ? (stats.max_c - stats.min_c).toFixed(2)
+      : "—";
+  const res = stats.width && stats.height ? `${stats.width} × ${stats.height}` : "—";
+  return [
+    reportStatRow("Minimum", `${fmt(stats.min_c)} ${u}`),
+    reportStatRow("Maximum", `${fmt(stats.max_c)} ${u}`),
+    reportStatRow("Mean", `${fmt(stats.mean_c)} ${u}`),
+    reportStatRow("Median", `${fmt(stats.median_c)} ${u}`),
+    reportStatRow("Std Dev", `${fmt(stats.std_c)} ${u}`),
+    reportStatRow("Resolution", res),
+    reportStatRow("Temp Range", `${range} ${u}`),
+  ].join("");
+}
+
+function buildThermalCameraLocationHtml(analysis: ThermalAnalysisData | null | undefined): string {
+  const m = analysis?.metadata_extracted;
+  if (!m) return `<div class="text-xs text-gray-500">—</div>`;
+  const lat = m.gps_coordinates?.latitude;
+  const lon = m.gps_coordinates?.longitude;
+  return [
+    reportStatRow("Camera", m.camera_model != null ? String(m.camera_model) : "N/A"),
+    reportStatRow("Serial", m.serial_number != null ? String(m.serial_number) : "N/A"),
+    reportStatRow("Focal Length", m.focal_length_mm != null ? `${m.focal_length_mm} mm` : "N/A"),
+    reportStatRow("F-Number", m.f_number != null ? `f/${m.f_number}` : "N/A"),
+    reportStatRow("Timestamp", m.timestamp != null ? String(m.timestamp) : "N/A"),
+    reportStatRow("Tilt", m.camera_tilt_deg != null ? `${m.camera_tilt_deg.toFixed(1)}°` : "N/A"),
+    reportStatRow("Latitude", lat != null ? lat.toFixed(6) : "N/A"),
+    reportStatRow("Longitude", lon != null ? lon.toFixed(6) : "N/A"),
+    reportStatRow("Altitude", m.altitude_m != null ? `${m.altitude_m.toFixed(1)} m` : "N/A"),
+    reportStatRow(
+      "Resolution",
+      m.image_width != null && m.image_height != null ? `${m.image_width}×${m.image_height}` : "N/A"
+    ),
+  ].join("");
+}
+
+function buildThermalDistanceEnvHtml(analysis: ThermalAnalysisData | null | undefined): string {
+  if (!analysis) return `<div class="text-xs text-gray-500">—</div>`;
+  const dist = analysis.distance_meters?.value;
+  const amb = analysis.environment?.ambient_temperature_c?.value;
+  const hum = analysis.environment?.humidity_percent?.value;
+  return [
+    reportStatRow("Distance", dist != null ? `${dist.toFixed(1)} m` : "N/A"),
+    reportStatRow("Ambient Temp", amb != null ? `${amb}°C` : "N/A"),
+    reportStatRow("Humidity", hum != null ? `${hum}%` : "N/A"),
+  ].join("");
+}
+
+function buildThermalParametersHtml(analysis: ThermalAnalysisData | null | undefined): string {
+  const tp = analysis?.thermal_parameters;
+  if (!tp) return `<div class="text-xs text-gray-500">—</div>`;
+  const emi = tp.emissivity?.value;
+  const ref = tp.reflected_temperature_c?.value;
+  return [
+    reportStatRow("Emissivity", emi != null ? emi.toFixed(3) : "N/A"),
+    reportStatRow("Reflected Temp", ref != null ? `${ref.toFixed(1)}°C` : "N/A"),
+  ].join("");
+}
+
+async function buildThermalDefectReportHtml(opts: {
+  f: FileInfo;
+  row: Record<string, unknown>;
+  run: RunEntry;
+  inspectionDate: string;
+  humanComment: string;
+}): Promise<string> {
+  const { f, row, run, inspectionDate, humanComment } = opts;
+  const unit = String(row.unit ?? "Celsius");
+  const stats = row.stats as ThermalStats | undefined;
+  const analysis = row.analysis as ThermalAnalysisData | undefined;
+
+  const vizRaw = String(row.thermal_visualization_url || row.thermal_image_url || "").trim();
+  const b64 = row.thermal_image_base64_png as string | undefined;
+
+  let vizData: string | null = null;
+  if (b64 && b64.length > 0) vizData = `data:image/png;base64,${b64}`;
+  else if (vizRaw) vizData = await fetchAsDataUrl(resolveThermalFetchUrl(vizRaw));
+
+  const thermalImgInner = vizData
+    ? `<img src="${vizData}" alt="Thermal map" class="object-contain w-full h-full bg-white">`
+    : `<span class="text-xs text-gray-500">No thermal image</span>`;
+
+  const statsInner = buildThermalTemperatureStatsHtml(stats, unit);
+  const camInner = buildThermalCameraLocationHtml(analysis);
+  const distInner = buildThermalDistanceEnvHtml(analysis);
+  const tpInner = buildThermalParametersHtml(analysis);
+
+  const label = "Thermal inspection";
+  const componentId = safeIdFromLabel("thermal");
+
+  const commentBlock = humanComment
+    ? `<div class="bg-blue-50 border-l-4 border-blue-600 p-1.5">
+         <h3 class="font-bold text-blue-900 mb-0.5 text-xs">Human suggestion</h3>
+         <p class="text-xs text-blue-950 leading-tight">${escapeReportHtml(humanComment)}</p>
+       </div>`
+    : "";
+
+  return `<section class="defect-block thermal-report-pdf mb-2">
+              <h2 class="text-sm font-bold text-blue-900 uppercase mb-1 border-b-2 border-gray-100 pb-0.5">Visual Assessment (Thermal Map)</h2>
+              <div class="grid grid-cols-2 gap-3 items-start thermal-visual-row">
+                <div class="flex flex-col min-h-0">
+                  <div class="bg-red-50 py-1 px-1.5 rounded-t-lg border border-red-300 border-b-0">
+                    <h3 class="font-bold text-red-700 text-center uppercase tracking-wide text-xs">Thermal visualization</h3>
+                  </div>
+                  <div class="border border-red-300 bg-white relative h-40 overflow-hidden flex items-center justify-center shrink-0">
+                    ${thermalImgInner}
+                    <span class="absolute bottom-1.5 left-1.5 bg-red-700 bg-opacity-90 text-white text-[10px] px-1.5 py-0.5 rounded">Thermal map</span>
+                  </div>
+                  <div class="border border-red-300 border-t-0 py-1 px-1.5 rounded-b-lg bg-red-50 shrink-0">
+                    <p class="text-xs text-gray-800 font-medium leading-tight">Radiometric temperature map for this capture.</p>
+                  </div>
+                </div>
+                <div class="flex flex-col min-h-0">
+                  <div class="bg-gray-100 py-1 px-1.5 rounded-t-lg border border-gray-300 border-b-0">
+                    <h3 class="font-bold text-green-700 text-center uppercase tracking-wide text-xs">Temperature Stats</h3>
+                  </div>
+                  <div class="border border-gray-300 border-t-0 bg-white py-1 px-1.5 shrink-0">
+                    ${statsInner}
+                  </div>
+                  <div class="border border-gray-300 border-t-0 py-1 px-1.5 rounded-b-lg bg-gray-50 shrink-0">
+                    <p class="text-xs text-gray-700 leading-tight">Full-frame statistics from thermal analysis.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-2 clear-both">
+                <h2 class="text-sm font-bold text-blue-900 uppercase mb-1 border-b-2 border-gray-100 pb-0.5">Defect Description &amp; Maintenance Plan</h2>
+                <div class="space-y-1.5">
+                  <div class="grid grid-cols-4 gap-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                    <div>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Component Name</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${escapeReportHtml(label)}</span>
+                    </div>
+                    <div>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Component ID</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${escapeReportHtml(componentId)}</span>
+                    </div>
+                    <div>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Batch / Run ID</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${escapeReportHtml(run.run_id)}</span>
+                    </div>
+                    <div>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Inspection Date</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${escapeReportHtml(inspectionDate)}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 class="font-semibold text-gray-800 text-[11px] mb-0.5">Detailed Findings:</h3>
+                    <p class="text-gray-600 leading-tight text-[11px] text-justify">
+                      ${defectBlurb("thermal_inspection")}
+                    </p>
+                    <p class="text-[10px] text-gray-400 mt-0.5">Source file: ${escapeReportHtml(String(f.filename || "—"))}</p>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2 items-start thermal-meta-row">
+                    <div class="border border-gray-200 rounded-lg py-1.5 px-1.5 bg-white self-start w-full">
+                      <h3 class="font-semibold text-gray-800 text-xs mb-0.5 border-b border-gray-100 pb-0.5">Camera &amp; Location</h3>
+                      ${camInner}
+                    </div>
+                    <div class="border border-gray-200 rounded-lg py-1.5 px-1.5 bg-white self-start w-full">
+                      <h3 class="font-semibold text-gray-800 text-xs mb-0.5 border-b border-gray-100 pb-0.5">Distance &amp; Environment</h3>
+                      ${distInner}
+                    </div>
+                  </div>
+                  <div class="border border-gray-200 rounded-lg py-1.5 px-1.5 bg-white">
+                    <h3 class="font-semibold text-gray-800 text-xs mb-0.5 border-b border-gray-100 pb-0.5">Thermal Parameters</h3>
+                    ${tpInner}
+                  </div>
+                  ${commentBlock}
+                  <div class="bg-yellow-50 border-l-4 border-yellow-500 p-1.5">
+                    <h3 class="font-bold text-yellow-800 mb-0.5 text-xs">Recommended Action: Priority Review</h3>
+                    <p class="text-xs text-yellow-900 leading-tight">
+                      Schedule field verification for the affected component area and apply corrective maintenance based on severity and asset criticality.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>`;
 }
 
 function copyRunId(runId: string) {
@@ -471,10 +679,20 @@ export default function Runs() {
     const today = new Date();
     const inspectionDate = today.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "2-digit" });
 
-    const perRunSections: string[] = [];
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const pdfJobs = selected.map((r) => ({
+      runs: [r] as typeof selected,
+      filename: `defect_report_${r.run_id.slice(0, 8)}_${dateStr}.pdf`,
+    }));
 
-    for (const run of selected) {
-      const dtype = runDisplayType(run);
+    let pdfExportSuccessCount = 0;
+
+    for (const { runs: runsForPdf, filename: pdfFilename } of pdfJobs) {
+      const perRunSections: string[] = [];
+      const pdfPageChunks: string[] = [];
+
+      for (const run of runsForPdf) {
+        const dtype = runDisplayType(run);
       const createdIso =
         typeof run.created_at === "string"
           ? run.created_at
@@ -498,13 +716,16 @@ export default function Runs() {
 
       const approvedMap = fileReviewStatusByRun[run.run_id] || {};
       const approvedComments = fileCommentByRun[run.run_id] || {};
+      /** DJI R-JPEG batch only — same `run_id` as `/api/thermal/batch/results/:id`. Image jobs tagged “thermal” use `run_id` from detection and must use the RGB defect loop below. */
+      const isThermalReportRun = Boolean(run.thermal_analysis_job);
+
       const imageFiles = run.files.filter((f) => {
         const fileKey = (f.file_id || f.filename || "").trim();
         if (!fileKey) return false;
         if (approvedMap[fileKey] !== "approved") return false;
         return Boolean(f.annotated_url || f.thumb_url);
       });
-      for (const f of imageFiles) {
+      if (!isThermalReportRun) for (const f of imageFiles) {
         const dets = Array.isArray(f.detections) ? f.detections : [];
         const boxes = dets
           .map((d: any) => ({
@@ -540,80 +761,124 @@ export default function Runs() {
           const label = b.label || "Defect";
           const componentId = safeIdFromLabel(label);
 
-          defectCards.push(
-            `
-            <section class="mb-10">
-              <h2 class="text-lg font-bold text-blue-900 uppercase mb-4 border-b-2 border-gray-100 pb-2">Visual Assessment (Side-by-Side)</h2>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          const defectHtml = `
+            <section class="defect-block rgb-defect-pdf mb-4">
+              <h2 class="text-sm font-bold text-blue-900 uppercase mb-2 border-b-2 border-gray-100 pb-1">Visual Assessment (Side-by-Side)</h2>
+              <div class="grid grid-cols-2 gap-4 items-start rgb-visual-row">
                 <div class="flex flex-col">
-                  <div class="bg-gray-100 p-2 rounded-t-lg border border-gray-300 border-b-0">
-                    <h3 class="font-bold text-green-700 text-center uppercase tracking-wide text-sm">Reference: Healthy State</h3>
+                  <div class="bg-gray-100 p-1.5 rounded-t-lg border border-gray-300 border-b-0">
+                    <h3 class="font-bold text-green-700 text-center uppercase tracking-wide text-xs">Reference: Healthy State</h3>
                   </div>
-                  <div class="border border-gray-300 bg-white relative h-64 md:h-80 overflow-hidden flex items-center justify-center">
-                    <img src="${healthyCrop}" alt="Healthy crop" class="object-contain w-full h-full bg-white">
-                    <span class="absolute bottom-3 left-3 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">Original crop</span>
+                  <div class="border border-gray-300 bg-white relative h-40 overflow-hidden flex items-center justify-center shrink-0">
                   </div>
-                  <div class="border border-gray-300 border-t-0 p-4 rounded-b-lg bg-gray-50">
-                    <p class="text-sm text-gray-700">Baseline visual condition for this localized region (no annotation overlay). Used for comparison.</p>
+                  <div class="border border-gray-300 border-t-0 p-2 rounded-b-lg bg-gray-50">
+                    <p class="text-xs text-gray-700">Baseline visual condition (no annotation overlay). Used for comparison.</p>
                   </div>
                 </div>
                 <div class="flex flex-col">
-                  <div class="bg-red-50 p-2 rounded-t-lg border border-red-300 border-b-0">
-                    <h3 class="font-bold text-red-700 text-center uppercase tracking-wide text-sm">Current: Defective State</h3>
+                  <div class="bg-red-50 p-1.5 rounded-t-lg border border-red-300 border-b-0">
+                    <h3 class="font-bold text-red-700 text-center uppercase tracking-wide text-xs">Current: Defective State</h3>
                   </div>
-                  <div class="border border-red-300 bg-white relative h-64 md:h-80 overflow-hidden flex items-center justify-center">
-                    <img src="${defectCrop}" alt="Defect crop" class="object-contain w-full h-full bg-white">
-                    <span class="absolute bottom-3 left-3 bg-red-700 bg-opacity-90 text-white text-xs px-2 py-1 rounded">Annotated crop</span>
+                  <div class="border border-red-300 bg-white relative h-40 overflow-hidden flex items-center justify-center shrink-0">
+                    <img src="${defectCrop}" alt="Defect crop" class="object-contain max-w-full max-h-full w-auto h-auto bg-white">
+                    <span class="absolute bottom-2 left-2 bg-red-700 bg-opacity-90 text-white text-[10px] px-1.5 py-0.5 rounded">Annotated crop</span>
                   </div>
-                  <div class="border border-red-300 border-t-0 p-4 rounded-b-lg bg-red-50">
-                    <p class="text-sm text-gray-800 font-medium">Defect detected: <span class="text-red-600">${label}</span></p>
+                  <div class="border border-red-300 border-t-0 p-2 rounded-b-lg bg-red-50">
+                    <p class="text-xs text-gray-800 font-medium">Defect detected: <span class="text-red-600">${label}</span></p>
                   </div>
                 </div>
               </div>
-              <section class="mt-8">
-                <h2 class="text-lg font-bold text-blue-900 uppercase mb-4 border-b-2 border-gray-100 pb-2">Defect Description & Maintenance Plan</h2>
-                <div class="space-y-4">
-                  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 bg-gray-50 p-6 rounded-lg border border-gray-200">
+              <div class="mt-3">
+                <h2 class="text-sm font-bold text-blue-900 uppercase mb-2 border-b-2 border-gray-100 pb-1">Defect Description & Maintenance Plan</h2>
+                <div class="space-y-2">
+                  <div class="grid grid-cols-4 gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
                     <div>
-                      <span class="block text-xs font-bold text-gray-500 uppercase">Component Name</span>
-                      <span class="block text-base font-semibold text-gray-900 mt-1">${label}</span>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Component Name</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${label}</span>
                     </div>
                     <div>
-                      <span class="block text-xs font-bold text-gray-500 uppercase">Component ID</span>
-                      <span class="block text-base font-semibold text-gray-900 mt-1">${componentId}</span>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Component ID</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${componentId}</span>
                     </div>
                     <div>
-                      <span class="block text-xs font-bold text-gray-500 uppercase">Batch / Run ID</span>
-                      <span class="block text-base font-semibold text-gray-900 mt-1">${run.run_id}</span>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Batch / Run ID</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${run.run_id}</span>
                     </div>
                     <div>
-                      <span class="block text-xs font-bold text-gray-500 uppercase">Inspection Date</span>
-                      <span class="block text-base font-semibold text-gray-900 mt-1">${inspectionDate}</span>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Inspection Date</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${inspectionDate}</span>
                     </div>
                   </div>
                   <div>
-                    <h3 class="font-semibold text-gray-800 text-md mb-2">Detailed Findings:</h3>
-                    <p class="text-gray-600 leading-relaxed text-sm text-justify">
+                    <h3 class="font-semibold text-gray-800 text-xs mb-1">Detailed Findings:</h3>
+                    <p class="text-gray-600 leading-snug text-xs text-justify">
                       ${defectBlurb(label)}
                     </p>
-                    <p class="text-xs text-gray-400 mt-2">Source file: ${String(f.filename || "—")}</p>
+                    <p class="text-[10px] text-gray-400 mt-1">Source file: ${String(f.filename || "—")}</p>
                   </div>
                   ${humanComment
-                    ? `<div class="bg-blue-50 border-l-4 border-blue-600 p-4">
-                         <h3 class="font-bold text-blue-900 mb-1">Human suggestion</h3>
-                         <p class="text-sm text-blue-950">${humanComment.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+                    ? `<div class="bg-blue-50 border-l-4 border-blue-600 p-2">
+                         <h3 class="font-bold text-blue-900 mb-0.5 text-xs">Human suggestion</h3>
+                         <p class="text-xs text-blue-950">${humanComment.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
                        </div>`
                     : ""}
-                  <div class="bg-yellow-50 border-l-4 border-yellow-500 p-4">
-                    <h3 class="font-bold text-yellow-800 mb-1">Recommended Action: Priority Review</h3>
-                    <p class="text-sm text-yellow-900">
+                  <div class="bg-yellow-50 border-l-4 border-yellow-500 p-2">
+                    <h3 class="font-bold text-yellow-800 mb-0.5 text-xs">Recommended Action: Priority Review</h3>
+                    <p class="text-xs text-yellow-900">
                       Schedule field verification for the affected component area and apply corrective maintenance based on severity and asset criticality.
                     </p>
                   </div>
                 </div>
-              </section>
-            </section>
-            `
+              </div>
+            </section>`;
+          defectCards.push(defectHtml);
+        }
+      }
+
+      if (isThermalReportRun) {
+        let thermalRows: Record<string, unknown>[] = [];
+        let thermalJobUnit = "Celsius";
+        try {
+          const rel = `/api/thermal/batch/results/${encodeURIComponent(run.run_id)}`;
+          const rurl = API_BASE ? `${API_BASE}${rel}` : rel;
+          const tres = await fetch(rurl);
+          if (tres.ok) {
+            const body = (await tres.json()) as { results?: unknown[]; unit?: string };
+            thermalRows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
+            if (typeof body.unit === "string" && body.unit) thermalJobUnit = body.unit;
+          }
+        } catch {
+          /* ignore */
+        }
+        for (const row of thermalRows) {
+          const fid = String(row.file_id ?? "").trim();
+          const fn = String(row.filename ?? "").trim();
+          const tf =
+            run.files.find(
+              (f) =>
+                (Boolean(fid) && (f.file_id || "").trim() === fid) ||
+                (Boolean(fn) && (f.filename || "").trim() === fn)
+            ) || null;
+          const fileKey = ((tf?.file_id || tf?.filename || fid || fn) || "").trim();
+          if (!fileKey) continue;
+          if (approvedMap[fileKey] !== "approved") continue;
+          const tComment = (approvedComments[fileKey] || "").trim();
+          const fileForReport: FileInfo =
+            tf ??
+            ({
+              filename: fn || `${fid || "thermal"}.jpg`,
+              file_id: fid || undefined,
+              status: "done",
+            } as FileInfo);
+          const rowUnit = row.unit != null ? String(row.unit) : thermalJobUnit;
+          defectCards.push(
+            await buildThermalDefectReportHtml({
+              f: fileForReport,
+              row: { ...row, unit: rowUnit },
+              run,
+              inspectionDate,
+              humanComment: tComment,
+            })
           );
         }
       }
@@ -626,26 +891,26 @@ export default function Runs() {
         );
       }
 
-      perRunSections.push(
-        `
-        <div class="max-w-5xl mx-auto bg-white p-8 md:p-12 shadow-xl border border-gray-200 mb-10">
-          <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b-4 border-blue-900 pb-6 mb-8">
+      const thermalPdfTight = isThermalReportRun;
+      const headerHtml = `
+          <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b-4 border-blue-900 ${thermalPdfTight ? "pb-3 mb-3" : "pb-6 mb-8"}">
             <div>
               <h1 class="text-3xl font-extrabold text-gray-900 uppercase tracking-wide">Component Defect Report</h1>
               <p class="text-gray-500 mt-1 font-medium">Transmission Line Asset Management</p>
-              <p class="text-xs text-gray-400 mt-2">Batch: <span class="font-Poppins">${run.run_id}</span> • Type: ${dtype.toUpperCase()} • Created: ${createdIso}</p>
+              <p class="text-xs text-gray-400 ${thermalPdfTight ? "mt-1" : "mt-2"}">Batch: <span class="font-Poppins">${run.run_id}</span> • Type: ${dtype.toUpperCase()} • Created: ${createdIso}</p>
               <p class="text-xs text-gray-400 mt-1">Assigned to: <span class="font-Poppins text-gray-600">${assigneeEscaped}</span></p>
             </div>
             <div class="mt-4 md:mt-0 text-right">
-              <img src="${brandLogoSrc}" alt="AzərEnerji" class="h-[9rem] md:h-[10.5rem] w-auto object-contain ml-auto" />
+              <img src="${brandLogoSrc}" alt="AzərEnerji" class="${thermalPdfTight ? "h-24 md:h-28" : "h-[9rem] md:h-[10.5rem]"} w-auto object-contain ml-auto" />
             </div>
-          </header>
-          ${defectCards.join("\n")}
-          <footer class="mt-12 pt-8 border-t-2 border-gray-300 flex flex-col md:flex-row justify-between items-end gap-8">
+          </header>`;
+
+      const footerHtml = `
+          <footer class="${thermalPdfTight ? "mt-5 pt-5 gap-4" : "mt-12 pt-8 gap-8"} border-t-2 border-gray-300 flex flex-col md:flex-row justify-between items-end">
             <div class="w-full md:w-auto">
               <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Official Report Generated By</p>
               <div class="flex items-center gap-3">
-                <img src="${brandLogoSrc}" alt="AzərEnerji" class="h-[6.75rem] w-auto object-contain" />
+                <img src="${brandLogoSrc}" alt="AzərEnerji" class="${thermalPdfTight ? "h-20" : "h-[6.75rem]"} w-auto object-contain" />
               </div>
             </div>
             <div class="flex flex-col md:flex-row gap-8 w-full md:w-auto">
@@ -658,13 +923,26 @@ export default function Runs() {
                 <p class="text-center text-xs font-semibold text-gray-600 uppercase">Sector Supervisor Approval</p>
               </div>
             </div>
-          </footer>
-        </div>
-        `
-      );
-    }
+          </footer>`;
 
-    const html = `<!DOCTYPE html>
+      const wrapCls = `max-w-5xl mx-auto bg-white p-8 md:p-12 shadow-xl border border-gray-200${thermalPdfTight ? " pdf-thermal-run" : ""}`;
+
+      const pdfPages: string[] = [];
+      if (defectCards.length <= 1) {
+        pdfPages.push(`<div class="pdf-page ${wrapCls}">${headerHtml}${defectCards[0] || ""}${footerHtml}</div>`);
+      } else {
+        pdfPages.push(`<div class="pdf-page ${wrapCls}">${headerHtml}${defectCards[0]}</div>`);
+        for (let di = 1; di < defectCards.length - 1; di++) {
+          pdfPages.push(`<div class="pdf-page ${wrapCls}">${defectCards[di]}</div>`);
+        }
+        pdfPages.push(`<div class="pdf-page ${wrapCls}">${defectCards[defectCards.length - 1]}${footerHtml}</div>`);
+      }
+
+        perRunSections.push(pdfPages.join("\n"));
+        pdfPageChunks.push(...pdfPages);
+      }
+
+      const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -674,9 +952,6 @@ export default function Runs() {
   <style>
     @media print {
       body { background-color: white; }
-      .print-shadow-none { box-shadow: none !important; }
-      .print-m-0 { margin: 0 !important; }
-      .print-p-0 { padding: 0 !important; }
       a { text-decoration: none; color: inherit; }
     }
   </style>
@@ -686,14 +961,118 @@ export default function Runs() {
 </body>
 </html>`;
 
-    const w = window.open("", "_blank");
-    if (!w) {
-      toast.error("Popup blocked. Allow popups to generate the report.", 4000);
-      return;
+      const pdfIframe = document.createElement("iframe");
+      pdfIframe.style.cssText = "position:fixed;left:-9999px;top:0;width:794px;height:1400px;border:none;visibility:hidden;";
+      document.body.appendChild(pdfIframe);
+      const pdfDoc = pdfIframe.contentDocument || pdfIframe.contentWindow?.document;
+      if (!pdfDoc) {
+        toast.error("Cannot generate PDF", 4000);
+        document.body.removeChild(pdfIframe);
+        continue;
+      }
+
+      const pdfFullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<script src="https://cdn.tailwindcss.com"><\/script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
+<style>
+/* PDF-only: full “page” height for flex fill, strip card chrome Tailwind adds on .pdf-page */
+body.pdf-report-root{margin:0;padding:0;width:794px;background:#fff}
+.pdf-page{
+  box-sizing:border-box!important;
+  width:100%!important;max-width:100%!important;margin:0 0 40px!important;
+  min-height:1123px!important;height:1123px!important;
+  display:flex!important;flex-direction:column!important;
+  border:none!important;box-shadow:none!important;outline:none!important;
+}
+.pdf-page>header{flex-shrink:0}
+.pdf-page>footer{flex-shrink:0;margin-top:auto}
+.pdf-page>.defect-block{flex:1 1 auto!important;display:flex!important;flex-direction:column!important;min-height:0!important}
+.pdf-page>.defect-block>h2:first-of-type{flex-shrink:0}
+.pdf-page>.defect-block>.grid{flex:1 1 auto!important;min-height:0!important;align-items:stretch!important;align-content:stretch!important;grid-template-rows:1fr!important}
+.pdf-page>.defect-block>.grid>.flex.flex-col{display:flex!important;flex-direction:column!important;min-height:0!important;height:100%!important}
+.pdf-page>.defect-block>.grid>.flex-col>.relative.h-44{flex:1 1 auto!important;min-height:176px!important;height:auto!important}
+.pdf-page>.defect-block>.mt-3{flex-shrink:0}
+.pdf-page>.defect-block.thermal-report-pdf{flex:0 1 auto!important}
+.pdf-page>.defect-block.thermal-report-pdf>.grid.thermal-visual-row{flex:0 1 auto!important;min-height:auto!important;grid-template-rows:auto!important;align-items:start!important}
+.pdf-page>.defect-block.thermal-report-pdf>.grid.thermal-visual-row>.flex.flex-col{height:auto!important;min-height:0!important}
+.pdf-page>.defect-block.thermal-report-pdf>.grid.thermal-visual-row .relative.h-40{flex:0 0 auto!important;height:160px!important;min-height:160px!important;max-height:160px!important;overflow:hidden!important}
+.pdf-page>.defect-block.thermal-report-pdf>.mt-2{flex:0 0 auto!important;flex-shrink:0!important;width:100%!important}
+.pdf-page>.defect-block.thermal-report-pdf .thermal-meta-row{align-items:start!important}
+.pdf-page.pdf-thermal-run{padding:1rem 1.25rem!important}
+.pdf-page>.defect-block.rgb-defect-pdf{flex:0 1 auto!important}
+.pdf-page>.defect-block.rgb-defect-pdf>.grid.rgb-visual-row{flex:0 1 auto!important;min-height:auto!important;grid-template-rows:auto!important;align-items:start!important}
+.pdf-page>.defect-block.rgb-defect-pdf>.grid.rgb-visual-row>.flex.flex-col{height:auto!important;min-height:0!important}
+.pdf-page>.defect-block.rgb-defect-pdf>.grid.rgb-visual-row .relative.h-40{flex:0 0 auto!important;height:160px!important;min-height:160px!important;max-height:160px!important;overflow:hidden!important}
+</style>
+</head><body class="pdf-report-root bg-white text-gray-800 font-sans">
+${pdfPageChunks.join("\n")}
+</body></html>`;
+
+      pdfDoc.open();
+      pdfDoc.write(pdfFullHtml);
+      pdfDoc.close();
+
+      await new Promise<void>((res) => {
+        let d = false;
+        const f = () => { if (!d) { d = true; res(); } };
+        pdfIframe.addEventListener("load", f);
+        setTimeout(f, 8000);
+      });
+      await new Promise((r) => setTimeout(r, 2500));
+
+      const allImgs = pdfDoc.body.querySelectorAll("img");
+      if (allImgs.length > 0) {
+        await Promise.all(Array.from(allImgs).map((img) => new Promise<void>((res) => {
+          if (img.complete && img.naturalWidth > 0) { res(); return; }
+          img.onload = () => res();
+          img.onerror = () => res();
+          setTimeout(res, 4000);
+        })));
+        await new Promise((r) => setTimeout(r, 300));
+      }
+
+      const iframeWin = pdfIframe.contentWindow as Window & { html2canvas?: (el: HTMLElement, opts: Record<string, unknown>) => Promise<HTMLCanvasElement> };
+      if (!iframeWin?.html2canvas) {
+        toast.error("PDF renderer failed to load", 4000);
+        document.body.removeChild(pdfIframe);
+        continue;
+      }
+
+      try {
+        const { jsPDF } = await import("jspdf");
+        const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+        const pageW = 210;
+        const pageH = 297;
+        const margin = 6;
+        const contentW = pageW - margin * 2;
+
+        const pageEls = pdfDoc.querySelectorAll(".pdf-page");
+        for (let pi = 0; pi < pageEls.length; pi++) {
+          const canvas = await iframeWin.html2canvas(pageEls[pi] as HTMLElement, {
+            scale: 2, useCORS: true,
+            width: 794, windowWidth: 794, scrollY: 0,
+            backgroundColor: "#ffffff",
+          });
+
+          const imgData = canvas.toDataURL("image/jpeg", 0.95);
+          const imgH = (canvas.height * contentW) / canvas.width;
+
+          if (pi > 0) pdf.addPage();
+          pdf.addImage(imgData, "JPEG", margin, margin, contentW, Math.min(imgH, pageH - margin * 2));
+        }
+
+        pdf.save(pdfFilename);
+        pdfExportSuccessCount++;
+      } catch {
+        toast.error("PDF generation failed", 4000);
+      } finally {
+        document.body.removeChild(pdfIframe);
+      }
     }
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
+
+    if (pdfExportSuccessCount > 0) {
+      toast.success(`${pdfExportSuccessCount} report${pdfExportSuccessCount > 1 ? "s" : ""} downloaded`, 2500);
+    }
   }, [runs, selectedRunIds, runCreatedTs, fileReviewStatusByRun, fileCommentByRun, batchAssigneeByRun]);
 
   const openPreview = (run: RunEntry, fileIdx = 0) => {

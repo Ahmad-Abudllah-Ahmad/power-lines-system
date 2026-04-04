@@ -7,6 +7,7 @@ import {
   IconMap2,
   IconClipboardList,
   IconSettings,
+  IconDrone,
 } from "@tabler/icons-react";
 import { ToastContainer, useToast } from "./Toast";
 import { ThemeProvider, type Theme } from "../context/ThemeContext";
@@ -23,6 +24,11 @@ const dockItems: FloatingDockItem[] = [
     title: "AI Detection",
     href: "/ai-detection",
     icon: <IconTarget stroke={1.5} className="size-[22px]" />,
+  },
+  {
+    title: "Live Drone Feed",
+    href: "/live-drone-feed",
+    icon: <IconDrone stroke={1.5} className="size-[22px]" />,
   },
   {
     title: "Recent Uploads",

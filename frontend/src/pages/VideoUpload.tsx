@@ -1081,7 +1081,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
                           className="flex items-center justify-between py-1 text-xs"
                         >
                           <span className="max-w-[140px] truncate dash-text-primary">
-                            {d.class_name}
+                            {d.class_name === "bolted_connection_missing_nut" || d.class_name === "bolted connection missing nut" ? "insulator" : d.class_name === "foreign_object" || d.class_name === "foreign object" ? "bolt_rust" : d.class_name}
                           </span>
                         </div>
                       );

@@ -222,6 +222,10 @@ async def get_thermal_results(job_id: str, include_base64: bool = False) -> dict
     results_by = job.get("results_by_file_id") or {}
     order = job.get("result_order") or []
     results = [results_by[fid] for fid in order if fid in results_by]
+    if not results and results_by:
+        for fid in job.get("files") or {}:
+            if fid in results_by:
+                results.append(results_by[fid])
     if not include_base64:
         results = [{**dict(r), "thermal_image_base64_png": None} for r in results]
 
