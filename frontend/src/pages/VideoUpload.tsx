@@ -21,6 +21,17 @@ import {
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
 import { VideoAnnotatedFrameStrip } from "../components/VideoAnnotatedFrameStrip";
+import { DetectionSidebarBucketPanels } from "../components/DetectionSidebarBucketPanels";
+import {
+  partitionDetectionsSidebarBuckets,
+  previewDetectionRowsForFile,
+  uniqueDefectTypeCount,
+} from "../utils/detectionSidebarBuckets";
+import {
+  type DetectionRowLike,
+  DetectionClassFilterDropdown,
+  useDetectionClassFilterForRows,
+} from "../components/DetectionClassFilter";
 
 const POLL_MS = 3000;
 
@@ -535,6 +546,18 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
     return { totalFiles: list.length, completed, totalDefects, avgConfidence, batchComplete };
   }, [cards]);
 
+  const previewDetectionRows = useMemo(() => {
+    if (!previewCard || previewCard.status !== "complete") return [];
+    return previewDetectionRowsForFile("video", previewCard.detections, videoFetchedDetections);
+  }, [previewCard, videoFetchedDetections]);
+
+  const clsFilter = useDetectionClassFilterForRows(previewDetectionRows as DetectionRowLike[], previewId);
+
+  const previewSidebarPartition = useMemo(() => {
+    if (!previewDetectionRows.length) return null;
+    return partitionDetectionsSidebarBuckets(clsFilter.filteredRows);
+  }, [previewDetectionRows.length, clsFilter.filteredRows]);
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = Math.floor(s % 60);
@@ -744,17 +767,24 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
                   {card.status !== "complete" && card.status !== "error" && (
                     <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-2">
                       <Clock
-                        className={card.status === "processing" ? "text-premium-accent animate-spin" : "dash-text-muted animate-spin"}
+                        className={
+                          card.status === "processing" || card.status === "queued"
+                            ? "text-premium-accent animate-spin"
+                            : "dash-text-muted animate-spin"
+                        }
                         size={22}
                       />
-                      {card.status === "processing" ? (
+                      {card.status === "processing" || card.status === "queued" ? (
                         <>
                           <span className="text-[10px] text-white font-medium px-2 text-center tabular-nums">
-                            {Math.round(card.progress)}%
+                            {Math.min(100, Math.max(0, Math.round(card.progress)))}%
                           </span>
                           <div className="w-3/4 bg-neutral-700 rounded-full h-1 overflow-hidden">
                             {card.progress > 0 ? (
-                              <div className="bg-cyan-500 h-full rounded-full transition-all duration-300" style={{ width: `${card.progress}%` }} />
+                              <div
+                                className="bg-cyan-500 h-full rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(100, card.progress)}%` }}
+                              />
                             ) : (
                               <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-gradient-to-r from-transparent via-cyan-500/70 to-transparent" />
                             )}
@@ -765,9 +795,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
                           <span className="text-[10px] text-white font-medium px-2 text-center">
                             {card.status === "uploading"
                               ? card.progressLabel
-                              : card.status === "pending"
-                              ? "Pending"
-                              : "Processing video"}
+                              : "Pending"}
                           </span>
                           <div className="w-3/4 bg-neutral-700 rounded-full h-1 overflow-hidden">
                             <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-gradient-to-r from-transparent via-cyan-500/70 to-transparent" />
@@ -786,11 +814,6 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
 
                   {card.status === "complete" && (
                     <>
-                      <div className="absolute top-1 right-1">
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${card.totalDetections > 0 ? "bg-red-500/90 text-white" : "bg-green-500/90 text-white"}`}>
-                          {card.totalDetections} det
-                        </span>
-                      </div>
                       <div className="absolute bottom-1 left-1">
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/80 text-white">
                           {formatTime(card.duration)}
@@ -893,7 +916,8 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
           <button
             type="button"
             onClick={() => setPreviewId(null)}
-            className="absolute top-4 right-4 z-10 rounded-full bg-[var(--dash-elevated-bg)] dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors"
+            className="absolute top-4 z-20 rounded-full bg-[var(--dash-elevated-bg)] dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem)]"
+            aria-label="Close preview"
           >
             <X size={24} />
           </button>
@@ -910,7 +934,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute right-[360px] top-1/2 -translate-y-1/2 z-10 rounded-full bg-[var(--dash-elevated-bg)] dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors md:right-[580px]"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full bg-[var(--dash-elevated-bg)] dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem+3.5rem)] md:right-[calc(320px+1rem+3.5rem+220px)]"
               >
                 <ChevronRight size={24} />
               </button>
@@ -984,22 +1008,52 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
                 <div className="text-xs dash-text-muted">Completed</div>
                 <div className="text-xl font-bold dash-text-primary">{sidebarBatchStats.completed}</div>
               </div>
-              <div>
-                <div className="text-xs dash-text-muted">Defects Found</div>
-                <div className={`text-xl font-bold ${sidebarBatchStats.totalDefects > 0 ? "text-red-400" : "text-green-400"}`}>
-                  {sidebarBatchStats.totalDefects}
-                </div>
+              <div className="col-span-2">
+                <div className="text-xs dash-text-muted">Detections</div>
+                {previewDetectionRows.length === 0 &&
+                (previewCard.totalDetections || 0) > 0 &&
+                videoDetectionsLoading ? (
+                  <div className="mt-0.5 text-sm font-bold dash-text-subtle">Loading…</div>
+                ) : previewSidebarPartition ? (
+                  <div
+                    className={`mt-0.5 text-sm font-bold leading-tight ${
+                      previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-green-400"
+                    }`}
+                  >
+                    <div>{previewSidebarPartition.components.length} components</div>
+                    <div>{previewSidebarPartition.defects.length} defects</div>
+                  </div>
+                ) : (
+                  <div
+                    className={`text-xl font-bold ${
+                      (previewCard.totalDetections || 0) > 0 ? "text-red-400" : "text-green-400"
+                    }`}
+                  >
+                    {previewCard.totalDetections || 0}
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="p-4 border-b border-[var(--dash-panel-border)]">
-              <div className="text-xs dash-text-muted mb-2">Current File</div>
-              <div className="text-sm dash-text-primary truncate font-medium" title={previewCard.filename}>{previewCard.filename}</div>
-              <div className="mt-3 space-y-2 text-xs">
-                <div className="flex justify-between dash-text-body">
-                  <span>Detections</span>
-                  <span className="dash-text-primary font-semibold">{previewCard.totalDetections || 0}</span>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs dash-text-muted mb-2">Current File</div>
+                  <div className="text-sm dash-text-primary truncate font-medium" title={previewCard.filename}>{previewCard.filename}</div>
                 </div>
+                <DetectionClassFilterDropdown
+                  filterClassKeys={clsFilter.filterClassKeys}
+                  hiddenSet={clsFilter.hiddenSet}
+                  open={clsFilter.open}
+                  setOpen={clsFilter.setOpen}
+                  anchorRef={clsFilter.anchorRef}
+                  toggleKey={clsFilter.toggleKey}
+                  showAll={clsFilter.showAll}
+                  hideAll={clsFilter.hideAll}
+                  liveOverlayEnabled={false}
+                />
+              </div>
+              <div className="mt-3 space-y-2 text-xs">
                 <div className="flex justify-between dash-text-body">
                   <span>Duration</span>
                   <span className="dash-text-primary font-semibold">{formatTime(previewCard.duration || 0)}</span>
@@ -1014,6 +1068,13 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
                 </div>
               </div>
             </div>
+
+            {previewCard.totalDetections > 0 && videoDetectionsLoading && previewDetectionRows.length === 0 && (
+              <div className="shrink-0 border-b border-[var(--dash-panel-border)] p-4 text-xs dash-text-subtle">Loading defect list…</div>
+            )}
+            {previewSidebarPartition && (previewSidebarPartition.components.length > 0 || previewSidebarPartition.defects.length > 0) && (
+              <DetectionSidebarBucketPanels partition={previewSidebarPartition} hideRowCounts />
+            )}
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <div className="text-xs dash-text-muted mb-3">All Files ({cards.size})</div>
@@ -1041,7 +1102,11 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
                         <div className="text-[11px] dash-text-primary truncate">{f.filename}</div>
                         <div className="text-[10px] dash-text-subtle">
                           {f.status === "complete" ? (
-                            <span className="text-green-400">{`${f.totalDetections || 0} detections`}</span>
+                            <span className="text-green-400">
+                              {Array.isArray(f.detections) && f.detections.length > 0
+                                ? `${uniqueDefectTypeCount(f.detections)} defects`
+                                : `${f.totalDetections || 0} detections`}
+                            </span>
                           ) : f.status === "processing" ? (
                             <span className="text-amber-400">Processing...</span>
                           ) : f.status === "error" ? (
@@ -1059,37 +1124,6 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
                 })}
               </div>
             </div>
-
-            {previewCard.totalDetections > 0 && videoDetectionsLoading && (
-              <div className="shrink-0 border-b border-[var(--dash-panel-border)] p-4 text-xs dash-text-subtle">Loading defect list…</div>
-            )}
-            {(() => {
-              const rows =
-                Array.isArray(previewCard.detections) && previewCard.detections.length > 0
-                  ? previewCard.detections
-                  : videoFetchedDetections;
-              const rowKeyBase = videoResultsFolderId(previewCard) || previewCard.fileId || previewCard.filename;
-              if (!rows.length) return null;
-              return (
-                <div className="max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-b border-[var(--dash-panel-border)] p-4">
-                  <div className="text-xs dash-text-muted mb-2">Video Detections ({rows.length})</div>
-                  <div className="space-y-1">
-                    {rows.map((d: any, i: number) => {
-                      return (
-                        <div
-                          key={`${rowKeyBase}-${i}`}
-                          className="flex items-center justify-between py-1 text-xs"
-                        >
-                          <span className="max-w-[140px] truncate dash-text-primary">
-                            {d.class_name === "bolted_connection_missing_nut" || d.class_name === "bolted connection missing nut" ? "insulator" : d.class_name === "foreign_object" || d.class_name === "foreign object" ? "bolt_rust" : d.class_name}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         </div>
       , document.body)

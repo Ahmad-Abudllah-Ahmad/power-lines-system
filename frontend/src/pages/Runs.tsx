@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { toast } from "../components/Toast";
 import { VideoAnnotatedFrameStrip } from "../components/VideoAnnotatedFrameStrip";
+import { DetectionSidebarBucketPanels } from "../components/DetectionSidebarBucketPanels";
 import {
   ThermalAnalysisDetailHeader,
   ThermalAnalysisDetailInner,
@@ -30,8 +31,26 @@ import {
   AlertTriangle,
   RefreshCw,
   ChevronDown,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from "lucide-react";
 import { API_BASE } from "../api/api";
+import {
+  partitionDetectionsSidebarBuckets,
+  uniqueDefectTypeCount,
+  previewDetectionRowsForFile,
+} from "../utils/detectionSidebarBuckets";
+import {
+  type DetectionRowLike,
+  DetectionClassFilterDropdown,
+  DETECTION_FILE_GRID_CLASS,
+  RGB_PREVIEW_ZOOM_MAX,
+  RGB_PREVIEW_ZOOM_MIN,
+  RGB_PREVIEW_ZOOM_STEP,
+  useDetectionClassFilterForRows,
+  useRgbPreviewDetectionOverlay,
+} from "../components/DetectionClassFilter";
 
 function resolveThermalFetchUrl(u: string): string {
   if (!u) return "";
@@ -52,6 +71,8 @@ type FileInfo = {
   video_url?: string;
   /** Per-box list (images from SAHI; videos: all boxes across frames, from detection server). */
   detections?: any[];
+  image_width?: number | null;
+  image_height?: number | null;
   stats?: { total_defects: number; avg_confidence: number; max_confidence: number; min_confidence: number; processing_time_ms: number };
   total_detections?: number;
   duration?: number;
@@ -170,12 +191,42 @@ function cropDataUrl(img: HTMLImageElement, bbox: number[]) {
   return canvas.toDataURL("image/png");
 }
 
+/** Full-frame image scaled for PDF (e.g. original / thumb without crop). */
+function fullImageContainedDataUrl(img: HTMLImageElement, maxLongEdge: number) {
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (w <= 0 || h <= 0) return null;
+  const longEdge = Math.max(w, h);
+  const scale = longEdge > maxLongEdge ? maxLongEdge / longEdge : 1;
+  const cw = Math.max(1, Math.round(w * scale));
+  const ch = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, w, h, 0, 0, cw, ch);
+  return canvas.toDataURL("image/png");
+}
+
 function escapeReportHtml(s: string): string {
   return String(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function pdfBatchMetaLine(batchTotal: number, approvedCount: number, processingMs: number): string {
+  const proc =
+    processingMs > 0
+      ? processingMs >= 1000
+        ? `${(processingMs / 1000).toFixed(1)} s`
+        : `${Math.round(processingMs)} ms`
+      : "—";
+  return `Images in batch: <span class="font-Poppins text-black">${batchTotal}</span>. Approved for report: <span class="font-Poppins text-black">${approvedCount}</span>.<br/><span class="block mt-1">Batch processing time: <span class="font-Poppins text-black">${proc}</span></span>`;
 }
 
 function reportThermalUnitLabel(u: string): string {
@@ -301,7 +352,6 @@ async function buildThermalDefectReportHtml(opts: {
                   </div>
                   <div class="border border-red-300 bg-white relative h-40 overflow-hidden flex items-center justify-center shrink-0">
                     ${thermalImgInner}
-                    <span class="absolute bottom-1.5 left-1.5 bg-red-700 bg-opacity-90 text-white text-[10px] px-1.5 py-0.5 rounded">Thermal map</span>
                   </div>
                   <div class="border border-red-300 border-t-0 py-1 px-1.5 rounded-b-lg bg-red-50 shrink-0">
                     <p class="text-xs text-gray-800 font-medium leading-tight">Radiometric temperature map for this capture.</p>
@@ -362,12 +412,6 @@ async function buildThermalDefectReportHtml(opts: {
                     ${tpInner}
                   </div>
                   ${commentBlock}
-                  <div class="bg-yellow-50 border-l-4 border-yellow-500 p-1.5">
-                    <h3 class="font-bold text-yellow-800 mb-0.5 text-xs">Recommended Action: Priority Review</h3>
-                    <p class="text-xs text-yellow-900 leading-tight">
-                      Schedule field verification for the affected component area and apply corrective maintenance based on severity and asset criticality.
-                    </p>
-                  </div>
                 </div>
               </div>
             </section>`;
@@ -417,41 +461,16 @@ function runDisplayType(run: RunEntry): "image" | "video" | "thermal" {
   return "image";
 }
 
+function runUniqueFindingsCount(run: RunEntry): number {
+  return run.files.reduce((s, f) => s + uniqueDefectTypeCount(f.detections), 0);
+}
+
 /** Folder under `/results/<id>/` (matches annotated.mp4); `video_url` often has it when `file_id` is absent. */
 function videoResultsFolderId(f: Pick<FileInfo, "file_id" | "video_url">): string | null {
   if (f.file_id) return f.file_id;
   const u = f.video_url?.trim() || "";
   const m = u.match(/\/results\/([^/]+)\//);
   return m?.[1] ?? null;
-}
-
-function DefectBboxOverlays(props: { detections: Array<{ bbox?: number[] }>; imgW: number; imgH: number }) {
-  const { detections, imgW, imgH } = props;
-  if (imgW <= 0 || imgH <= 0) return null;
-  return (
-    <>
-      {detections.map((d, i) => {
-        const b = d.bbox;
-        if (!Array.isArray(b) || b.length < 4) return null;
-        const x1 = Number(b[0]);
-        const y1 = Number(b[1]);
-        const x2 = Number(b[2]);
-        const y2 = Number(b[3]);
-        if (![x1, y1, x2, y2].every((n) => Number.isFinite(n))) return null;
-        const left = (Math.min(x1, x2) / imgW) * 100;
-        const top = (Math.min(y1, y2) / imgH) * 100;
-        const w = (Math.abs(x2 - x1) / imgW) * 100;
-        const h = (Math.abs(y2 - y1) / imgH) * 100;
-        return (
-          <div
-            key={i}
-            className="pointer-events-none absolute z-[5] rounded-sm border-2 border-cyan-300 shadow-[0_0_0_1px_rgba(0,0,0,0.85)]"
-            style={{ left: `${left}%`, top: `${top}%`, width: `${w}%`, height: `${h}%` }}
-          />
-        );
-      })}
-    </>
-  );
 }
 
 export default function Runs() {
@@ -484,12 +503,14 @@ export default function Runs() {
   const [thermalScanRoiStats, setThermalScanRoiStats] = useState<ThermalStats | null>(null);
   const [thermalScanRoiLoading, setThermalScanRoiLoading] = useState(false);
   const runsPreviewVideoRef = useRef<HTMLVideoElement>(null);
+  const runsPreviewImgRef = useRef<HTMLImageElement>(null);
+  const runsPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const batchFromQuery = searchParams.get("batch");
   const highlightBoundaries = searchParams.get("highlight") === "1";
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const appliedBatchRef = useRef<string | null>(null);
-  const [previewImageDims, setPreviewImageDims] = useState({ w: 0, h: 0 });
+  const [previewModalZoom, setPreviewModalZoom] = useState(1);
   const [fileReviewStatusByRun, setFileReviewStatusByRun] = useState<Record<string, Record<string, "approved" | "canceled" | undefined>>>(() => {
     try {
       const raw = localStorage.getItem("runs_file_review_status_v1");
@@ -719,6 +740,23 @@ export default function Runs() {
       /** DJI R-JPEG batch only — same `run_id` as `/api/thermal/batch/results/:id`. Image jobs tagged “thermal” use `run_id` from detection and must use the RGB defect loop below. */
       const isThermalReportRun = Boolean(run.thermal_analysis_job);
 
+      let thermalRows: Record<string, unknown>[] = [];
+      let thermalJobUnit = "Celsius";
+      if (isThermalReportRun) {
+        try {
+          const rel = `/api/thermal/batch/results/${encodeURIComponent(run.run_id)}`;
+          const rurl = API_BASE ? `${API_BASE}${rel}` : rel;
+          const tres = await fetch(rurl);
+          if (tres.ok) {
+            const body = (await tres.json()) as { results?: unknown[]; unit?: string };
+            thermalRows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
+            if (typeof body.unit === "string" && body.unit) thermalJobUnit = body.unit;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
       const imageFiles = run.files.filter((f) => {
         const fileKey = (f.file_id || f.filename || "").trim();
         if (!fileKey) return false;
@@ -737,39 +775,43 @@ export default function Runs() {
 
         if (boxes.length === 0) continue;
 
-        const healthyUrl = (f.thumb_url || f.annotated_url || "").trim();
-        const defectUrl = (f.annotated_url || f.thumb_url || "").trim();
-        if (!healthyUrl || !defectUrl) continue;
+        const originalUrl = (f.thumb_url || "").trim();
+        const annotatedUrl = (f.annotated_url || f.thumb_url || "").trim();
+        if (!annotatedUrl) continue;
+        const referenceSourceUrl = originalUrl || annotatedUrl;
 
-        let healthyImg: HTMLImageElement | null = null;
+        let referenceImg: HTMLImageElement | null = null;
         let defectImg: HTMLImageElement | null = null;
         try {
-          [healthyImg, defectImg] = await Promise.all([loadImage(healthyUrl), loadImage(defectUrl)]);
+          [referenceImg, defectImg] = await Promise.all([loadImage(referenceSourceUrl), loadImage(annotatedUrl)]);
         } catch {
           continue;
         }
+
+        const referenceFull = referenceImg ? fullImageContainedDataUrl(referenceImg, 1600) : null;
+        if (!referenceFull) continue;
 
         const fileKey = (f.file_id || f.filename || "").trim();
         const humanComment = fileKey ? (approvedComments[fileKey] || "").trim() : "";
 
         for (const b of boxes) {
           const bbox = b.bbox as number[];
-          const healthyCrop = healthyImg ? cropDataUrl(healthyImg, bbox) : null;
           const defectCrop = defectImg ? cropDataUrl(defectImg, bbox) : null;
-          if (!healthyCrop || !defectCrop) continue;
+          if (!defectCrop) continue;
 
           const label = b.label || "Defect";
           const componentId = safeIdFromLabel(label);
 
           const defectHtml = `
             <section class="defect-block rgb-defect-pdf mb-4">
-              <h2 class="text-sm font-bold text-blue-900 uppercase mb-2 border-b-2 border-gray-100 pb-1">Visual Assessment (Side-by-Side)</h2>
+              <h2 class="text-sm font-bold text-blue-900 uppercase mb-2 border-b-2 border-gray-100 pb-1">Visual Assessment</h2>
               <div class="grid grid-cols-2 gap-4 items-start rgb-visual-row">
                 <div class="flex flex-col">
                   <div class="bg-gray-100 p-1.5 rounded-t-lg border border-gray-300 border-b-0">
-                    <h3 class="font-bold text-green-700 text-center uppercase tracking-wide text-xs">Reference: Healthy State</h3>
+                    <h3 class="font-bold text-green-700 text-center uppercase tracking-wide text-xs">REFERENCE:</h3>
                   </div>
                   <div class="border border-gray-300 bg-white relative h-40 overflow-hidden flex items-center justify-center shrink-0">
+                    <img src="${referenceFull}" alt="Reference original" class="object-contain max-w-full max-h-full w-auto h-auto bg-white">
                   </div>
                   <div class="border border-gray-300 border-t-0 p-2 rounded-b-lg bg-gray-50">
                     <p class="text-xs text-gray-700">Baseline visual condition (no annotation overlay). Used for comparison.</p>
@@ -777,14 +819,13 @@ export default function Runs() {
                 </div>
                 <div class="flex flex-col">
                   <div class="bg-red-50 p-1.5 rounded-t-lg border border-red-300 border-b-0">
-                    <h3 class="font-bold text-red-700 text-center uppercase tracking-wide text-xs">Current: Defective State</h3>
+                    <h3 class="font-bold text-red-700 text-center uppercase tracking-wide text-xs">CURRENT:</h3>
                   </div>
                   <div class="border border-red-300 bg-white relative h-40 overflow-hidden flex items-center justify-center shrink-0">
                     <img src="${defectCrop}" alt="Defect crop" class="object-contain max-w-full max-h-full w-auto h-auto bg-white">
-                    <span class="absolute bottom-2 left-2 bg-red-700 bg-opacity-90 text-white text-[10px] px-1.5 py-0.5 rounded">Annotated crop</span>
                   </div>
                   <div class="border border-red-300 border-t-0 p-2 rounded-b-lg bg-red-50">
-                    <p class="text-xs text-gray-800 font-medium">Defect detected: <span class="text-red-600">${label}</span></p>
+                    <p class="text-xs text-gray-800 font-medium">Detection: <span class="text-red-600">${label}</span></p>
                   </div>
                 </div>
               </div>
@@ -810,11 +851,7 @@ export default function Runs() {
                     </div>
                   </div>
                   <div>
-                    <h3 class="font-semibold text-gray-800 text-xs mb-1">Detailed Findings:</h3>
-                    <p class="text-gray-600 leading-snug text-xs text-justify">
-                      ${defectBlurb(label)}
-                    </p>
-                    <p class="text-[10px] text-gray-400 mt-1">Source file: ${String(f.filename || "—")}</p>
+                    <p class="text-[10px] text-gray-400">Source file: ${String(f.filename || "—")}</p>
                   </div>
                   ${humanComment
                     ? `<div class="bg-blue-50 border-l-4 border-blue-600 p-2">
@@ -822,12 +859,6 @@ export default function Runs() {
                          <p class="text-xs text-blue-950">${humanComment.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
                        </div>`
                     : ""}
-                  <div class="bg-yellow-50 border-l-4 border-yellow-500 p-2">
-                    <h3 class="font-bold text-yellow-800 mb-0.5 text-xs">Recommended Action: Priority Review</h3>
-                    <p class="text-xs text-yellow-900">
-                      Schedule field verification for the affected component area and apply corrective maintenance based on severity and asset criticality.
-                    </p>
-                  </div>
                 </div>
               </div>
             </section>`;
@@ -836,20 +867,6 @@ export default function Runs() {
       }
 
       if (isThermalReportRun) {
-        let thermalRows: Record<string, unknown>[] = [];
-        let thermalJobUnit = "Celsius";
-        try {
-          const rel = `/api/thermal/batch/results/${encodeURIComponent(run.run_id)}`;
-          const rurl = API_BASE ? `${API_BASE}${rel}` : rel;
-          const tres = await fetch(rurl);
-          if (tres.ok) {
-            const body = (await tres.json()) as { results?: unknown[]; unit?: string };
-            thermalRows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
-            if (typeof body.unit === "string" && body.unit) thermalJobUnit = body.unit;
-          }
-        } catch {
-          /* ignore */
-        }
         for (const row of thermalRows) {
           const fid = String(row.file_id ?? "").trim();
           const fn = String(row.filename ?? "").trim();
@@ -891,6 +908,25 @@ export default function Runs() {
         );
       }
 
+      const batchTotal = run.total_files > 0 ? run.total_files : run.files.length;
+      const approvedCount = run.files.filter((f) => {
+        const k = (f.file_id || f.filename || "").trim();
+        return Boolean(k) && approvedMap[k] === "approved";
+      }).length;
+      let batchProcessingMs = 0;
+      if (isThermalReportRun && thermalRows.length > 0) {
+        for (const tr of thermalRows) {
+          const m = tr.processing_time_ms;
+          if (typeof m === "number" && Number.isFinite(m)) batchProcessingMs += m;
+        }
+      }
+      if (batchProcessingMs === 0) {
+        batchProcessingMs = run.files.reduce((s, f) => {
+          const ms = f.stats?.processing_time_ms;
+          return s + (typeof ms === "number" && Number.isFinite(ms) ? ms : 0);
+        }, 0);
+      }
+
       const thermalPdfTight = isThermalReportRun;
       const headerHtml = `
           <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b-4 border-blue-900 ${thermalPdfTight ? "pb-3 mb-3" : "pb-6 mb-8"}">
@@ -899,6 +935,7 @@ export default function Runs() {
               <p class="text-gray-500 mt-1 font-medium">Transmission Line Asset Management</p>
               <p class="text-xs text-gray-400 ${thermalPdfTight ? "mt-1" : "mt-2"}">Batch: <span class="font-Poppins">${run.run_id}</span> • Type: ${dtype.toUpperCase()} • Created: ${createdIso}</p>
               <p class="text-xs text-gray-400 mt-1">Assigned to: <span class="font-Poppins text-gray-600">${assigneeEscaped}</span></p>
+              <p class="text-lg text-black mt-1.5 leading-relaxed font-medium">${pdfBatchMetaLine(batchTotal, approvedCount, batchProcessingMs)}</p>
             </div>
             <div class="mt-4 md:mt-0 text-right">
               <img src="${brandLogoSrc}" alt="AzərEnerji" class="${thermalPdfTight ? "h-24 md:h-28" : "h-[9rem] md:h-[10.5rem]"} w-auto object-contain ml-auto" />
@@ -1083,7 +1120,47 @@ ${pdfPageChunks.join("\n")}
   const completedFiles = previewRun?.files.filter(f => f.status === "done") || [];
   const previewFile = completedFiles[previewFileIdx] || null;
 
+  const previewDetectionRows = useMemo(() => {
+    if (!previewRun || !previewFile) return [];
+    return previewDetectionRowsForFile(previewRun.type, previewFile.detections, videoFetchedDetections);
+  }, [previewRun, previewFile, videoFetchedDetections]);
+
+  const previewClassFilterResetKey =
+    previewRun && previewFile ? `${previewRun.run_id}:${previewFileIdx}` : null;
+  const clsFilter = useDetectionClassFilterForRows(
+    previewDetectionRows as DetectionRowLike[],
+    previewClassFilterResetKey
+  );
+
+  const previewSidebarPartition = useMemo(() => {
+    if (!previewDetectionRows.length) return null;
+    return partitionDetectionsSidebarBuckets(clsFilter.filteredRows);
+  }, [previewDetectionRows.length, clsFilter.filteredRows]);
+
   const isDjiThermalScanUpload = Boolean(previewRun?.thermal_analysis_job);
+
+  const runsPreviewSourceW = typeof previewFile?.image_width === "number" ? previewFile.image_width : 0;
+  const runsPreviewSourceH = typeof previewFile?.image_height === "number" ? previewFile.image_height : 0;
+  const runsPreviewHasSourceDims = runsPreviewSourceW > 0 && runsPreviewSourceH > 0;
+  const runsPreviewThumbSrc = previewFile?.thumb_url?.trim() || "";
+  const runsPreviewShowLiveOverlay =
+    !isDjiThermalScanUpload &&
+    previewRun?.type !== "video" &&
+    runsPreviewHasSourceDims &&
+    Boolean(runsPreviewThumbSrc);
+
+  const runsOverlayDetections = clsFilter.filteredRows.filter(
+    (d) => Array.isArray(d.bbox) && d.bbox.length >= 4
+  ) as Array<{ bbox: number[]; class_name?: string; label?: string }>;
+
+  useRgbPreviewDetectionOverlay(runsPreviewImgRef, runsPreviewCanvasRef, {
+    enabled: runsPreviewShowLiveOverlay,
+    sourceW: runsPreviewSourceW,
+    sourceH: runsPreviewSourceH,
+    detections: runsOverlayDetections,
+    imageUrlKey: `${previewRun?.run_id}:${previewFileIdx}:${runsPreviewThumbSrc}`,
+    modalZoom: previewModalZoom,
+  });
   const thermalResultRow: Record<string, unknown> | null = (() => {
     if (!isDjiThermalScanUpload || !previewFile || !thermalBatchResults?.length) return null;
     const pid = previewFile.file_id;
@@ -1136,10 +1213,6 @@ ${pdfPageChunks.join("\n")}
     setThermalScanRoiEnd(null);
     setThermalScanRoiStats(null);
   }, [previewRun?.run_id, previewFileIdx, previewFile?.filename]);
-
-  useEffect(() => {
-    setPreviewImageDims({ w: 0, h: 0 });
-  }, [previewRun?.run_id, previewFileIdx, thermalOriginalUrlResolved, isDjiThermalScanUpload]);
 
   const handleThermalScanRoiMouseDown = useCallback(
     (e: React.MouseEvent<HTMLImageElement>) => {
@@ -1344,6 +1417,10 @@ ${pdfPageChunks.join("\n")}
     return () => window.removeEventListener("keydown", onKey);
   }, [previewRun, closePreview]);
 
+  useEffect(() => {
+    setPreviewModalZoom(1);
+  }, [previewRun?.run_id]);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} className="space-y-6">
       <div className="flex items-end justify-between">
@@ -1433,7 +1510,7 @@ ${pdfPageChunks.join("\n")}
           {[
             { label: "Total Runs", value: runs.length, color: "text-cyan-400" },
             { label: "Total Files", value: runs.reduce((s, r) => s + r.total_files, 0), color: "text-blue-400" },
-            { label: "Total Defects", value: runs.reduce((s, r) => s + r.total_defects, 0), color: "text-red-400" },
+            { label: "Total Defects", value: runs.reduce((s, r) => s + runUniqueFindingsCount(r), 0), color: "text-red-400" },
             { label: "Needs Review", value: runs.reduce((s, r) => s + r.needs_review, 0), color: "text-amber-400" },
           ].map(s => (
             <div key={s.label} className="rounded-xl border border-[var(--dash-panel-border)] p-4 backdrop-blur-sm" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
@@ -1475,6 +1552,7 @@ ${pdfPageChunks.join("\n")}
               ) : (
                 filtered.map((run, i) => {
                   const dtype = runDisplayType(run);
+                  const findingsCount = runUniqueFindingsCount(run);
                   const assigneeLabel = (batchAssigneeByRun[run.run_id] || "").trim();
                   const isSelected = selectedRunIds.has(run.run_id);
                   return (
@@ -1539,8 +1617,8 @@ ${pdfPageChunks.join("\n")}
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`font-semibold ${run.total_defects > 0 ? "text-red-400" : "text-green-400"}`}>
-                          {run.total_defects}
+                        <span className={`font-semibold ${findingsCount > 0 ? "text-red-400" : "text-green-400"}`}>
+                          {findingsCount}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -1638,398 +1716,70 @@ ${pdfPageChunks.join("\n")}
       {/* Preview panel (portal: video | frame strip | sidebar, same as Video Upload) */}
       {previewRun && typeof document !== "undefined" && createPortal(
         <div
-          className="fixed inset-0 z-[200] flex min-h-0 min-w-0 flex-row items-stretch bg-[var(--dash-overlay-scrim)]"
+          className="fixed inset-0 z-[200] flex min-h-0 min-w-0 w-full flex-row items-stretch bg-[var(--dash-overlay-scrim)]"
           role="presentation"
           onClick={() => closePreview()}
         >
-          <button
-            type="button"
-            onClick={() => closePreview()}
-            className="absolute top-4 right-4 z-10 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors"
-            style={{ backgroundColor: "var(--dash-elevated-bg)" }}
-          >
-            <X size={24} />
-          </button>
-
           {completedFiles.length > 1 && !isDjiThermalScanUpload && (
             <>
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(-1); }}
-                className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)]"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2.5 hover:bg-[var(--dash-hover-bg)] transition-all duration-150 shadow-lg left-[max(1rem,calc(210px+0.5rem))] xl:left-[max(1rem,calc(240px+0.5rem))]"
                 style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
-                <ChevronLeft size={24} />
+                <ChevronLeft size={20} />
               </button>
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute right-[360px] top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] md:right-[580px]"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2.5 hover:bg-[var(--dash-hover-bg)] transition-all duration-150 shadow-lg right-[max(1rem,calc(380px+0.5rem))]"
                 style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
-                <ChevronRight size={24} />
+                <ChevronRight size={20} />
               </button>
             </>
           )}
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-row items-stretch pt-14">
-            {isDjiThermalScanUpload ? (
-              <div
-                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-[var(--dash-panel-border)] md:border-r"
-                style={{ backgroundColor: "var(--dash-media-bg)" }}
-                onClick={e => e.stopPropagation()}
-              >
-                <ThermalAnalysisDetailHeader
-                  filename={previewFile?.filename ?? "Thermal"}
-                  fileIndexDisplay={previewFileIdx}
-                  fileCountDisplay={completedFiles.length}
-                  onPrev={() => navigatePreview(-1)}
-                  onNext={() => navigatePreview(1)}
-                  compact
-                />
-                <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-                <ThermalAnalysisDetailInner
-                  thermalImageB64={undefined}
-                  thermalImageUrl={
-                    thermalVisualizationUrlResolved || thermalOriginalUrlResolved || null
-                  }
-                  stats={(thermalResultRow?.stats as ThermalStats) ?? null}
-                  analysis={(thermalResultRow?.analysis as ThermalAnalysisData) ?? null}
-                  unit={thermalUnit}
-                  analysisConfiguration={{
-                    objectType: thermalBatchJobMeta?.object_type ?? null,
-                    paletteId: thermalBatchJobMeta?.palette ?? null,
-                  }}
-                  loading={thermalBatchLoading}
-                  enableRoi
-                  roiActive={thermalScanRoiActive}
-                  onToggleRoi={() => {
-                    setThermalScanRoiActive((a) => !a);
-                    setThermalScanRoiStart(null);
-                    setThermalScanRoiEnd(null);
-                    setThermalScanRoiStats(null);
-                  }}
-                  roiStart={thermalScanRoiStart}
-                  roiEnd={thermalScanRoiEnd}
-                  roiStats={thermalScanRoiStats}
-                  roiLoading={thermalScanRoiLoading}
-                  onImageMouseDown={handleThermalScanRoiMouseDown}
-                  onImageMouseUp={handleThermalScanRoiMouseUp}
-                />
-                </div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-row items-stretch">
+            {/* LEFT — Files (thumbnail grid) */}
+            <div
+              className="flex h-full min-h-0 w-[210px] xl:w-[240px] shrink-0 flex-col overflow-hidden border-r border-dash dash-modal-aside"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-b border-dash">
+                <span className="text-[10px] font-bold uppercase tracking-widest dash-text-subtle">Files</span>
+                <span className="text-[10px] tabular-nums dash-text-muted bg-[var(--dash-inset-bg)] border border-dash rounded px-1.5 py-0.5">
+                  {previewRun.files.length}
+                </span>
               </div>
-            ) : (
-              <>
-                <div
-                  className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-4 md:p-8"
-                  onClick={e => e.stopPropagation()}
-                >
-                  {previewFile ? (
-                    <div className="relative w-full max-w-5xl">
-                      <div className="absolute top-2 right-2 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
-                        {previewFileIdx + 1} / {completedFiles.length}
-                      </div>
-                      {previewRun.type === "video" && previewFile.video_url ? (
-                        <video
-                          ref={runsPreviewVideoRef}
-                          key={previewFile.video_url}
-                          src={previewFile.video_url}
-                          controls
-                          autoPlay
-                          playsInline
-                          className="max-h-[min(80vh,calc(100vh-8rem))] w-full rounded-xl bg-black shadow-2xl"
-                        />
-                      ) : previewFile.annotated_url ? (
-                        <div className="relative inline-block max-w-full">
-                          <img
-                            src={previewFile.annotated_url}
-                            alt={previewFile.filename}
-                            onLoad={(e) => {
-                              setPreviewImageDims({
-                                w: e.currentTarget.naturalWidth,
-                                h: e.currentTarget.naturalHeight,
-                              });
-                            }}
-                            className="w-full rounded-xl shadow-2xl max-h-[80vh] object-contain bg-black"
-                          />
-                          {highlightBoundaries &&
-                            !isDjiThermalScanUpload &&
-                            previewRun.type !== "video" &&
-                            Array.isArray(previewFile.detections) &&
-                            previewFile.detections.length > 0 && (
-                              <DefectBboxOverlays
-                                detections={previewFile.detections}
-                                imgW={previewImageDims.w}
-                                imgH={previewImageDims.h}
-                              />
-                            )}
-                        </div>
-                      ) : (
-                        <div className="flex aspect-video w-full items-center justify-center rounded-xl dash-text-subtle" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
-                          No preview available
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-lg dash-text-subtle">No completed files to preview</div>
-                  )}
-                </div>
 
-                {previewRun.type === "video" && previewFile?.video_url && (
-                  <VideoAnnotatedFrameStrip
-                    videoUrl={previewFile.video_url}
-                    duration={previewFile.duration || 0}
-                    fps={previewFile.fps || 0}
-                    framesAnalyzed={previewFile.frames_analyzed || 0}
-                    mainVideoRef={runsPreviewVideoRef}
-                  />
-                )}
-              </>
-            )}
-          </div>
+              <div className="flex-1 overflow-y-auto min-h-0 p-2">
+                <div className={previewRun.type === "video" ? "flex flex-col gap-1.5" : "grid grid-cols-2 gap-1.5"}>
+                  {previewRun.files.map((f, idx) => {
+                    const cIdx = completedFiles.indexOf(f);
+                    const isActive = cIdx === previewFileIdx;
+                    const fileKey = (f.file_id || f.filename || `${idx}`).trim();
+                    const reviewStatus = (fileReviewStatusByRun[previewRun.run_id] || {})[fileKey];
+                    const comment = (fileCommentByRun[previewRun.run_id] || {})[fileKey] || "";
+                    const editorKey = `${previewRun.run_id}::${fileKey}`;
+                    const editorOpen = activeCommentEditorKey === editorKey;
+                    const rowKey = f.file_id || `${f.filename}-${idx}`;
 
-          <div
-            className="flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-hidden border-l border-[var(--dash-panel-border)] pt-14"
-            style={{ backgroundColor: "var(--dash-modal-aside)" }}
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="p-4 border-b border-[var(--dash-panel-border)]">
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
-                  runDisplayType(previewRun) === "image"
-                    ? "bg-blue-500/20 border-blue-500/50"
-                    : runDisplayType(previewRun) === "thermal"
-                      ? "bg-orange-500/20 text-orange-300 border-orange-500/50"
-                      : "bg-purple-500/20 text-purple-300 border-purple-500/50"
-                }`}>{runDisplayType(previewRun).toUpperCase()}</span>
-                <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
-                  isRunBatchComplete(previewRun.status) ? "bg-green-500/20 border-green-500/50" : "bg-amber-500/20 text-amber-300 border-amber-500/50"
-                }`}>{isRunBatchComplete(previewRun.status) ? "COMPLETE" : "PROCESSING"}</span>
-              </div>
-              <div className="text-sm font-Poppins dash-text-muted truncate" title={previewRun.run_id}>ID: {previewRun.run_id}</div>
-              <div className="text-xs dash-text-subtle mt-1">{timeAgo(previewRun.created_at)}</div>
-            </div>
-
-            {/* Stats */}
-            <div className="p-4 border-b border-[var(--dash-panel-border)] grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-xs dash-text-muted">Total Files</div>
-                <div className="text-xl font-bold dash-text-primary">{previewRun.total_files}</div>
-              </div>
-              <div>
-                <div className="text-xs dash-text-muted">Completed</div>
-                <div className="text-xl font-bold dash-text-primary">{previewRun.completed}</div>
-              </div>
-              <div>
-                <div className="text-xs dash-text-muted">Defects Found</div>
-                <div className={`text-xl font-bold ${previewRun.total_defects > 0 ? "text-red-400" : "text-green-400"}`}>
-                  {previewRun.total_defects}
-                </div>
-              </div>
-            </div>
-
-            {/* Current file details */}
-            {previewFile && (
-              <div className="p-4 border-b border-[var(--dash-panel-border)]">
-                <div className="text-xs dash-text-muted mb-2">Current File</div>
-                <div className="text-sm dash-text-primary truncate font-medium" title={previewFile.filename}>{previewFile.filename}</div>
-                {previewRun.type !== "video" && previewFile.stats && (
-                  <div className="mt-3 space-y-2 text-xs">
-                    <div className="flex justify-between dash-text-body">
-                      <span>Defects</span>
-                      <span className="dash-text-primary font-semibold">{previewFile.stats.total_defects}</span>
-                    </div>
-                    <div className="flex justify-between dash-text-body">
-                      <span>Processing Time</span>
-                      <span className="dash-text-primary font-semibold">{previewFile.stats.processing_time_ms}ms</span>
-                    </div>
-                  </div>
-                )}
-                {previewRun.type === "video" && (
-                  <div className="mt-3 space-y-2 text-xs">
-                    <div className="flex justify-between dash-text-body">
-                      <span>Detections</span>
-                      <span className="dash-text-primary font-semibold">{previewFile.total_detections || 0}</span>
-                    </div>
-                    <div className="flex justify-between dash-text-body">
-                      <span>Duration</span>
-                      <span className="dash-text-primary font-semibold">{formatDuration(previewFile.duration || 0)}</span>
-                    </div>
-                    <div className="flex justify-between dash-text-body">
-                      <span>FPS</span>
-                      <span className="dash-text-primary font-semibold">{previewFile.fps || 0}</span>
-                    </div>
-                    <div className="flex justify-between dash-text-body">
-                      <span>Frames Analyzed</span>
-                      <span className="dash-text-primary font-semibold">{previewFile.frames_analyzed || 0}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Detections for image runs: above file list */}
-            {previewRun.type !== "video" && (() => {
-              if (!previewFile) return null;
-              const rows = previewFile.detections || [];
-              const rowKeyBase = previewFile.file_id || previewFile.filename;
-              const isRgbImageRun = runDisplayType(previewRun) === "image";
-              const foreignObjectCount = rows.reduce((n: number, d: any) => {
-                const name = String(d?.class_name ?? "").trim().toLowerCase();
-                return name === "foreign_object" ? n + 1 : n;
-              }, 0);
-              const missingNutCount = rows.reduce((n: number, d: any) => {
-                const name = String(d?.class_name ?? "").trim().toLowerCase().replaceAll("-", " ").replaceAll("_", " ");
-                return name === "bolted connection missing nut" ? n + 1 : n;
-              }, 0);
-              if (!rows.length) return null;
-              return (
-                <div className="max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-b border-[var(--dash-panel-border)] p-4">
-                  <div className="text-xs dash-text-muted mb-2">
-                    Detections ({rows.length})
-                  </div>
-                  <div className="space-y-1">
-                    {rows.map((d: any, i: number) => {
-                      return (
-                        <div
-                          key={`${rowKeyBase}-${i}`}
-                          className="flex items-center justify-between py-1 text-xs"
-                        >
-                          <span className="max-w-[140px] truncate dash-text-primary">
-                            {(() => {
-                              const raw = d?.class_name;
-                              const norm = String(raw ?? "").trim().toLowerCase().replaceAll("-", " ").replaceAll("_", " ");
-                              if (isRgbImageRun && foreignObjectCount > 3 && norm === "foreign object") return "bolt_rust";
-                              if (isRgbImageRun && missingNutCount >= 3 && norm === "bolted connection missing nut") return "insulator";
-                              return raw;
-                            })()}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* File list */}
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <div className="text-xs dash-text-muted mb-3">All Files ({previewRun.files.length})</div>
-              <div className="space-y-1.5">
-                {previewRun.files.map((f, idx) => {
-                  const cIdx = completedFiles.indexOf(f);
-                  const isActive = cIdx === previewFileIdx;
-                  const fileKey = (f.file_id || f.filename || `${idx}`).trim();
-                  const reviewStatus = (fileReviewStatusByRun[previewRun.run_id] || {})[fileKey];
-                  const comment = (fileCommentByRun[previewRun.run_id] || {})[fileKey] || "";
-                  const editorKey = `${previewRun.run_id}::${fileKey}`;
-                  const editorOpen = activeCommentEditorKey === editorKey;
-                  return (
-                    <div key={f.file_id || `${f.filename}-${idx}`} className="w-full">
-                      <button
-                        onClick={() => {
-                          if (cIdx >= 0) setPreviewFileIdx(cIdx);
-                        }}
-                        className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
-                          isActive ? "bg-cyan-500/20 border border-cyan-500/50" : "hover:bg-[var(--dash-hover-bg)] border border-transparent"
-                        } ${f.status !== "done" ? "opacity-50 cursor-default" : "cursor-pointer"}`}
-                      >
-                      {f.thumb_url ? (
-                        <img src={f.thumb_url} className="w-8 h-8 rounded object-cover flex-shrink-0" alt="" />
-                      ) : (
-                        <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
-                          {runDisplayType(previewRun) === "video" ? <Video size={12} className="dash-text-subtle" /> : runDisplayType(previewRun) === "thermal" ? <Thermometer size={12} className="dash-text-subtle" /> : <Image size={12} className="dash-text-subtle" />}
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[11px] dash-text-primary truncate">{f.filename}</div>
-                        <div className="text-[10px] dash-text-subtle">
-                          {f.status === "done" ? (
-                            <span>{previewRun.type === "video" ? `${f.total_detections || 0} detections` : `${f.stats?.total_defects || 0} defects`}</span>
-                          ) : f.status === "processing" ? (
-                            <span className="text-amber-400">Processing...</span>
-                          ) : f.status === "error" ? (
-                            <span className="text-red-400">Error</span>
-                          ) : (
-                            <span>Queued</span>
-                          )}
-                        </div>
-                      </div>
-                      {f.status === "done" && (
-                        <div className="flex items-center gap-1 min-w-[190px] justify-end">
-                          {reviewStatus === "approved" ? (
-                            <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold">
-                              Approved
-                            </span>
-                          ) : reviewStatus === "canceled" ? (
-                            <span className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300">
-                              Canceled
-                            </span>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (editorOpen) {
-                                setActiveCommentEditorKey(null);
-                                return;
-                              }
-                              setActiveCommentEditorKey(editorKey);
-                              setCommentDraft(comment || "");
-                            }}
-                            className="rounded-md border border-[var(--dash-panel-border)] px-2 py-1 dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
-                            style={{ backgroundColor: "var(--dash-nested-bg-mid)" }}
-                            title="Comment"
-                            aria-label="Comment"
+                    const commentPanel =
+                      f.status === "done" && (comment.trim() || editorOpen) ? (
+                        <div className={previewRun.type === "video" ? "px-2 pb-2 -mt-0.5" : "col-span-2 px-0 pb-1"}>
+                          <div
+                            className="rounded-xl border border-[var(--dash-panel-border)] p-2.5"
+                            style={{ backgroundColor: "var(--dash-nested-bg)" }}
                           >
-                            <MessageSquare size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFileReviewStatus(previewRun.run_id, fileKey, "approved");
-                            }}
-                            className={`rounded-md border px-2 py-1 transition-colors ${
-                              reviewStatus === "approved"
-                                ? "border-emerald-500/60 bg-emerald-500/15"
-                                : "border-[var(--dash-panel-border)] bg-[var(--dash-nested-bg-mid)] dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)]"
-                            }`}
-                            title="Approve"
-                            aria-label="Approve"
-                          >
-                            <CheckCircle2 size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFileReviewStatus(previewRun.run_id, fileKey, "canceled");
-                            }}
-                            className={`rounded-md border px-2 py-1 transition-colors ${
-                              reviewStatus === "canceled"
-                                ? "border-red-500/60 bg-red-500/15 text-red-200"
-                                : "border-[var(--dash-panel-border)] bg-[var(--dash-nested-bg-mid)] dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)]"
-                            }`}
-                            title="Cancel"
-                            aria-label="Cancel"
-                          >
-                            <XCircle size={14} />
-                          </button>
-                        </div>
-                      )}
-                      {f.status === "done" && <CheckCircle2 size={12} className="flex-shrink-0" />}
-                      {f.status === "processing" && <Clock size={12} className="text-amber-400 animate-spin flex-shrink-0" />}
-                      {f.status === "error" && <XCircle size={12} className="text-red-400 flex-shrink-0" />}
-                      </button>
-                      {f.status === "done" && (comment.trim() || editorOpen) ? (
-                        <div className="px-3 pb-3 -mt-1">
-                          <div className="rounded-lg border border-[var(--dash-panel-border)] p-3" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-[11px] font-semibold dash-text-body">Comment</div>
-                              {editorOpen ? (
-                                <div className="flex items-center gap-2">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <div className="flex items-center gap-1.5">
+                                <MessageSquare size={10} className="dash-text-muted" />
+                                <span className="text-[10px] font-semibold dash-text-muted uppercase tracking-wider">Note</span>
+                              </div>
+                              {editorOpen && (
+                                <div className="flex items-center gap-1.5">
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -2037,7 +1787,7 @@ ${pdfPageChunks.join("\n")}
                                       setFileComment(previewRun.run_id, fileKey, commentDraft);
                                       setActiveCommentEditorKey(null);
                                     }}
-                                    className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-500/15 transition-colors"
+                                    className="rounded-md px-2 py-0.5 text-[10px] font-semibold text-cyan-300 bg-cyan-500/15 border border-cyan-500/30 hover:bg-cyan-500/25 transition-colors"
                                   >
                                     Save
                                   </button>
@@ -2048,73 +1798,569 @@ ${pdfPageChunks.join("\n")}
                                       setCommentDraft(comment || "");
                                       setActiveCommentEditorKey(null);
                                     }}
-                                    className="rounded-md border border-[var(--dash-panel-border)] px-2 py-1 text-[11px] font-semibold dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                                    className="rounded-md px-2 py-0.5 text-[10px] font-semibold dash-text-body border border-[var(--dash-panel-border)] hover:bg-[var(--dash-hover-bg)] transition-colors"
                                     style={{ backgroundColor: "var(--dash-nested-bg-mid)" }}
                                   >
                                     Cancel
                                   </button>
                                 </div>
-                              ) : null}
+                              )}
                             </div>
+
                             {editorOpen ? (
                               <textarea
                                 value={commentDraft}
                                 onChange={(e) => setCommentDraft(e.target.value)}
                                 onClick={(e) => e.stopPropagation()}
                                 rows={2}
-                                placeholder="Add a note for this image (will appear in the report as Human suggestion)"
-                                className="mt-2 w-full resize-none rounded-lg border placeholder-[var(--dash-subtle)] px-3 py-2 text-[12px] outline-none focus:ring-2 focus:ring-cyan-500/40"
-                                style={{ backgroundColor: "var(--dash-inset-bg)", borderColor: "var(--dash-inset-border)", color: "var(--dash-heading)" }}
+                                placeholder="Add a note…"
+                                className="w-full resize-none rounded-lg border px-2.5 py-2 text-[11px] outline-none focus:ring-1 focus:ring-cyan-500/50 placeholder-[var(--dash-subtle)] leading-relaxed"
+                                style={{
+                                  backgroundColor: "var(--dash-inset-bg)",
+                                  borderColor: "var(--dash-inset-border)",
+                                  color: "var(--dash-heading)",
+                                }}
                               />
                             ) : (
-                              <div className="mt-2 text-[12px] dash-text-body">{comment}</div>
+                              <p className="text-[11px] dash-text-body leading-relaxed">{comment}</p>
                             )}
                           </div>
                         </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
+                      ) : null;
+
+                    if (previewRun.type === "video") {
+                      return (
+                        <div key={rowKey} className="w-full">
+                          <button
+                            onClick={() => {
+                              if (cIdx >= 0) setPreviewFileIdx(cIdx);
+                            }}
+                            className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-all duration-100 ${
+                              isActive
+                                ? "bg-cyan-500/15 border border-cyan-500/40 ring-1 ring-cyan-500/20"
+                                : "hover:bg-[var(--dash-hover-bg)] border border-transparent"
+                            } ${f.status !== "done" ? "opacity-40 cursor-default" : "cursor-pointer"}`}
+                          >
+                            {f.thumb_url ? (
+                              <img src={f.thumb_url} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" alt="" />
+                            ) : (
+                              <div
+                                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                                style={{ backgroundColor: "var(--dash-inset-bg)" }}
+                              >
+                                {runDisplayType(previewRun) === "video" ? (
+                                  <Video size={13} className="dash-text-subtle" />
+                                ) : runDisplayType(previewRun) === "thermal" ? (
+                                  <Thermometer size={13} className="dash-text-subtle" />
+                                ) : (
+                                  <Image size={13} className="dash-text-subtle" />
+                                )}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[11px] dash-text-primary truncate font-medium">{f.filename}</div>
+                              <div className="text-[10px] dash-text-subtle mt-0.5">
+                                {f.status === "done" ? (
+                                  <span className="text-emerald-400/80">
+                                    {previewRun.type === "video"
+                                      ? `${f.total_detections || 0} detections`
+                                      : `${uniqueDefectTypeCount(f.detections)} defects`}
+                                  </span>
+                                ) : f.status === "processing" ? (
+                                  <span className="text-amber-400">Processing…</span>
+                                ) : f.status === "error" ? (
+                                  <span className="text-red-400">Error</span>
+                                ) : (
+                                  <span className="dash-text-subtle">Queued</span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                          {commentPanel}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <React.Fragment key={rowKey}>
+                        <div className="min-w-0">
+                          <div
+                            className={`flex flex-col overflow-hidden rounded-xl border transition-all duration-100 ${
+                              isActive
+                                ? "border-cyan-500/40 bg-cyan-500/10 ring-1 ring-cyan-500/20"
+                                : "border-[var(--dash-panel-border)] bg-[var(--dash-nested-bg-soft)] hover:bg-[var(--dash-hover-bg)] hover:border-[var(--dash-hover-border)]"
+                            } ${f.status !== "done" ? "opacity-40" : ""}`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (cIdx >= 0) setPreviewFileIdx(cIdx);
+                              }}
+                              className={`flex w-full flex-col p-2 text-left ${
+                                f.status !== "done" ? "cursor-default" : "cursor-pointer"
+                              }`}
+                            >
+                              <div className="relative mb-1.5 aspect-square w-full overflow-hidden rounded-lg bg-[var(--dash-inset-bg)]">
+                                {f.thumb_url ? (
+                                  <img src={f.thumb_url} className="h-full w-full object-cover" alt="" />
+                                ) : (
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    {runDisplayType(previewRun) === "thermal" ? (
+                                      <Thermometer size={14} className="dash-text-subtle" />
+                                    ) : (
+                                      <Image size={14} className="dash-text-subtle" />
+                                    )}
+                                  </div>
+                                )}
+
+                                {isActive && (
+                                  <span className="absolute bottom-1 right-1 z-[1] rounded-full bg-emerald-500 p-0.5 shadow-sm">
+                                    <CheckCircle2 size={8} className="text-white" strokeWidth={3} />
+                                  </span>
+                                )}
+
+                                {f.status === "processing" && (
+                                  <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
+                                    <Clock size={14} className="animate-spin text-amber-400" />
+                                  </span>
+                                )}
+
+                                {f.status === "error" && (
+                                  <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
+                                    <XCircle size={14} className="text-red-400" />
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="truncate text-[10px] font-medium dash-text-primary leading-tight" title={f.filename}>
+                                {f.filename}
+                              </div>
+
+                              <div className="mt-0.5 text-[9px] font-semibold">
+                                {f.status === "done" ? (
+                                  <span className="text-emerald-400">{`${uniqueDefectTypeCount(f.detections)} defects`}</span>
+                                ) : f.status === "processing" ? (
+                                  <span className="text-amber-400">Processing…</span>
+                                ) : f.status === "error" ? (
+                                  <span className="text-red-400">Error</span>
+                                ) : (
+                                  <span className="dash-text-subtle">Queued</span>
+                                )}
+                              </div>
+                            </button>
+
+                            {f.status === "done" && (
+                              <div
+                                className="flex flex-wrap items-center justify-center gap-1 border-t border-[var(--dash-panel-border)] px-1.5 py-1.5"
+                                style={{ backgroundColor: "var(--dash-nested-bg-mid)" }}
+                              >
+                                {reviewStatus === "approved" && (
+                                  <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[8px] font-semibold leading-tight text-emerald-400">
+                                    Approved
+                                  </span>
+                                )}
+                                {reviewStatus === "canceled" && (
+                                  <span className="rounded-md border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[8px] font-semibold leading-tight text-red-300">
+                                    Canceled
+                                  </span>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (editorOpen) {
+                                      setActiveCommentEditorKey(null);
+                                      return;
+                                    }
+                                    setActiveCommentEditorKey(editorKey);
+                                    setCommentDraft(comment || "");
+                                  }}
+                                  className={`rounded-lg border p-1 transition-colors ${
+                                    editorOpen
+                                      ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
+                                      : "border-[var(--dash-panel-border)] dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)]"
+                                  }`}
+                                  style={!editorOpen ? { backgroundColor: "var(--dash-nested-bg-mid)" } : undefined}
+                                  title="Comment"
+                                  aria-label="Comment"
+                                >
+                                  <MessageSquare size={11} />
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFileReviewStatus(previewRun.run_id, fileKey, "approved");
+                                  }}
+                                  className={`rounded-lg border p-1 transition-colors ${
+                                    reviewStatus === "approved"
+                                      ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
+                                      : "border-[var(--dash-panel-border)] dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)]"
+                                  }`}
+                                  style={reviewStatus !== "approved" ? { backgroundColor: "var(--dash-nested-bg-mid)" } : undefined}
+                                  title="Approve"
+                                  aria-label="Approve"
+                                >
+                                  <CheckCircle2 size={11} />
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFileReviewStatus(previewRun.run_id, fileKey, "canceled");
+                                  }}
+                                  className={`rounded-lg border p-1 transition-colors ${
+                                    reviewStatus === "canceled"
+                                      ? "border-red-500/50 bg-red-500/15 text-red-300"
+                                      : "border-[var(--dash-panel-border)] dash-text-body hover:dash-text-primary hover:bg-[var(--dash-hover-bg)]"
+                                  }`}
+                                  style={reviewStatus !== "canceled" ? { backgroundColor: "var(--dash-nested-bg-mid)" } : undefined}
+                                  title="Cancel"
+                                  aria-label="Cancel"
+                                >
+                                  <XCircle size={11} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {commentPanel}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* Video detections: below All Files */}
-            {previewRun.type === "video" &&
-              previewFile &&
-              (previewFile.total_detections || 0) > 0 &&
-              videoDetectionsLoading && (
-                <div className="shrink-0 border-b border-[var(--dash-panel-border)] p-4 text-xs dash-text-subtle">Loading defect list…</div>
-              )}
-            {previewRun.type === "video" && (() => {
-              if (!previewFile) return null;
-              const rows =
-                Array.isArray(previewFile.detections) && previewFile.detections.length > 0
-                  ? previewFile.detections
-                  : videoFetchedDetections;
-              const rowKeyBase = videoResultsFolderId(previewFile) || previewFile.file_id || previewFile.filename;
-              if (!rows.length) return null;
-              return (
-                <div className="max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-b border-[var(--dash-panel-border)] p-4">
-                  <div className="text-xs dash-text-muted mb-2">
-                    Detections ({rows.length})
-                  </div>
-                  <div className="space-y-1">
-                    {rows.map((d: any, i: number) => {
-                      return (
-                        <div
-                          key={`${rowKeyBase}-${i}`}
-                          className="flex items-center justify-between py-1 text-xs"
-                        >
-                          <span className="max-w-[140px] truncate dash-text-primary">
-                            {d.class_name}
-                          </span>
-                        </div>
-                      );
-                    })}
+            {/* CENTER — Main preview (centered in remaining space) */}
+            <div
+              className={`flex min-h-0 min-w-0 flex-1 flex-row items-stretch justify-center ${
+                isDjiThermalScanUpload ? "" : "bg-black"
+              }`}
+            >
+              {isDjiThermalScanUpload ? (
+                <div
+                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                  style={{ backgroundColor: "var(--dash-media-bg)" }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <ThermalAnalysisDetailHeader
+                    filename={previewFile?.filename ?? "Thermal"}
+                    fileIndexDisplay={previewFileIdx}
+                    fileCountDisplay={completedFiles.length}
+                    onPrev={() => navigatePreview(-1)}
+                    onNext={() => navigatePreview(1)}
+                    compact
+                  />
+                  <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+                    <ThermalAnalysisDetailInner
+                      thermalImageB64={undefined}
+                      thermalImageUrl={
+                        thermalVisualizationUrlResolved || thermalOriginalUrlResolved || null
+                      }
+                      stats={(thermalResultRow?.stats as ThermalStats) ?? null}
+                      analysis={(thermalResultRow?.analysis as ThermalAnalysisData) ?? null}
+                      unit={thermalUnit}
+                      analysisConfiguration={{
+                        objectType: thermalBatchJobMeta?.object_type ?? null,
+                        paletteId: thermalBatchJobMeta?.palette ?? null,
+                      }}
+                      loading={thermalBatchLoading}
+                      enableRoi
+                      roiActive={thermalScanRoiActive}
+                      onToggleRoi={() => {
+                        setThermalScanRoiActive((a) => !a);
+                        setThermalScanRoiStart(null);
+                        setThermalScanRoiEnd(null);
+                        setThermalScanRoiStats(null);
+                      }}
+                      roiStart={thermalScanRoiStart}
+                      roiEnd={thermalScanRoiEnd}
+                      roiStats={thermalScanRoiStats}
+                      roiLoading={thermalScanRoiLoading}
+                      onImageMouseDown={handleThermalScanRoiMouseDown}
+                      onImageMouseUp={handleThermalScanRoiMouseUp}
+                    />
                   </div>
                 </div>
-              );
-            })()}
+              ) : (
+                <>
+                  <div
+                    className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center overflow-auto scrollbar-gutter-stable p-6 md:p-10 w-full"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {previewFile ? (
+                      <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center">
+                        {previewRun.type !== "video" && previewFile.annotated_url && (
+                          <div
+                            className="absolute top-3 left-3 z-10 flex items-center gap-0.5 rounded-xl border border-[var(--dash-panel-border)] overflow-hidden shadow-lg"
+                            style={{ backgroundColor: "var(--dash-elevated-bg)" }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewModalZoom((z) =>
+                                  Math.max(RGB_PREVIEW_ZOOM_MIN, z - RGB_PREVIEW_ZOOM_STEP)
+                                )
+                              }
+                              className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                            >
+                              <ZoomOut size={15} />
+                            </button>
+                            <span className="px-2 text-xs dash-text-body min-w-[3.25rem] text-center font-medium tabular-nums">
+                              {Math.round(previewModalZoom * 100)}%
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewModalZoom((z) =>
+                                  Math.min(RGB_PREVIEW_ZOOM_MAX, z + RGB_PREVIEW_ZOOM_STEP)
+                                )
+                              }
+                              className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                            >
+                              <ZoomIn size={15} />
+                            </button>
+                            <div className="w-px h-5 bg-[var(--dash-panel-border)]" />
+                            <button
+                              type="button"
+                              onClick={() => setPreviewModalZoom(1)}
+                              className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                            >
+                              <RotateCcw size={13} />
+                            </button>
+                          </div>
+                        )}
+
+                        <div
+                          className="absolute top-3 right-3 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body font-medium tabular-nums shadow-sm"
+                          style={{ backgroundColor: "var(--dash-elevated-bg)" }}
+                        >
+                          {previewFileIdx + 1} / {completedFiles.length}
+                        </div>
+
+                        {previewRun.type === "video" && previewFile.video_url ? (
+                          <video
+                            ref={runsPreviewVideoRef}
+                            key={previewFile.video_url}
+                            src={previewFile.video_url}
+                            controls
+                            autoPlay
+                            playsInline
+                            className="max-h-[min(80vh,calc(100vh-8rem))] w-full max-w-full rounded-2xl bg-black shadow-2xl"
+                          />
+                        ) : (previewFile.annotated_url || runsPreviewThumbSrc) ? (
+                          <div
+                            className="relative mx-auto inline-block max-w-full rounded-2xl shadow-2xl transition-[transform] duration-150 ease-out"
+                            style={{ transform: `scale(${previewModalZoom})`, transformOrigin: "center" }}
+                          >
+                            {runsPreviewShowLiveOverlay ? (
+                              <>
+                                <img
+                                  ref={runsPreviewImgRef}
+                                  src={runsPreviewThumbSrc}
+                                  alt={previewFile.filename}
+                                  className="w-full max-h-[80vh] rounded-2xl object-contain bg-black block"
+                                  draggable={false}
+                                />
+                                <canvas
+                                  ref={runsPreviewCanvasRef}
+                                  className="pointer-events-none absolute inset-0 h-full w-full rounded-2xl"
+                                  aria-hidden
+                                />
+                              </>
+                            ) : (
+                              <img
+                                src={previewFile.annotated_url}
+                                alt={previewFile.filename}
+                                className="w-full max-h-[80vh] rounded-2xl object-contain bg-black"
+                              />
+                            )}
+                          </div>
+                        ) : (
+                          <div
+                            className="mx-auto flex aspect-video w-full max-w-3xl items-center justify-center rounded-2xl dash-text-subtle text-sm"
+                            style={{ backgroundColor: "var(--dash-nested-bg)" }}
+                          >
+                            No preview available
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-base dash-text-subtle">No completed files to preview</div>
+                    )}
+                  </div>
+
+                  {previewRun.type === "video" && previewFile?.video_url && (
+                    <VideoAnnotatedFrameStrip
+                      videoUrl={previewFile.video_url}
+                      duration={previewFile.duration || 0}
+                      fps={previewFile.fps || 0}
+                      framesAnalyzed={previewFile.frames_analyzed || 0}
+                      mainVideoRef={runsPreviewVideoRef}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* RIGHT — Stats & details */}
+            <div
+              className="flex h-full min-h-0 w-[380px] shrink-0 flex-col overflow-hidden border-l border-dash dash-modal-aside"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex shrink-0 items-stretch border-b border-dash">
+                <div className="flex min-w-0 flex-1 items-center px-3 py-2.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest dash-text-subtle">Run</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => closePreview()}
+                  className="flex shrink-0 items-center justify-center px-3 border-l border-dash hover:bg-[var(--dash-hover-bg)] transition-colors"
+                  aria-label="Close preview"
+                >
+                  <X size={18} className="dash-text-subtle" />
+                </button>
+              </div>
+              <div className="shrink-0 p-4 border-b border-dash">
+                <div className="flex items-center gap-2 mb-2.5">
+                  <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border tracking-wide ${
+                    runDisplayType(previewRun) === "image"
+                      ? "bg-blue-500/15 text-blue-300 border-blue-500/30"
+                      : runDisplayType(previewRun) === "thermal"
+                        ? "bg-orange-500/15 text-orange-300 border-orange-500/30"
+                        : "bg-purple-500/15 text-purple-300 border-purple-500/30"
+                  }`}>
+                    {runDisplayType(previewRun).toUpperCase()}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border tracking-wide ${
+                    isRunBatchComplete(previewRun.status)
+                      ? "bg-green-500/15 text-green-300 border-green-500/30"
+                      : "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                  }`}>
+                    {isRunBatchComplete(previewRun.status) ? "COMPLETE" : "PROCESSING"}
+                  </span>
+                </div>
+                <div className="text-xs font-mono dash-text-muted truncate" title={previewRun.run_id}>
+                  {previewRun.run_id}
+                </div>
+                <div className="text-[11px] dash-text-subtle mt-1">{timeAgo(previewRun.created_at)}</div>
+              </div>
+
+              <div className="shrink-0 p-4 border-b border-dash">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="flex flex-col gap-0.5">
+                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide">Files</div>
+                    <div className="text-xl font-bold dash-text-primary tabular-nums">{previewRun.total_files}</div>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide">Done</div>
+                    <div className="text-xl font-bold dash-text-primary tabular-nums">{previewRun.completed}</div>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide">Defects</div>
+                    {previewFile != null && previewRun ? (
+                      previewRun.type === "video" &&
+                      previewDetectionRows.length === 0 &&
+                      (previewFile.total_detections || 0) > 0 &&
+                      videoDetectionsLoading ? (
+                        <div className="text-sm font-bold dash-text-subtle mt-0.5">…</div>
+                      ) : previewSidebarPartition ? (
+                        <div className="flex flex-col gap-0.5 mt-0.5">
+                          <span className="text-[11px] font-semibold dash-text-body tabular-nums">
+                            {previewSidebarPartition.components.length} comp.
+                          </span>
+                          <span className={`text-[11px] font-bold tabular-nums ${previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-green-400"}`}>
+                            {previewSidebarPartition.defects.length} def.
+                          </span>
+                        </div>
+                      ) : (
+                        <div className={`text-xl font-bold tabular-nums ${previewRun.total_defects > 0 ? "text-red-400" : "text-green-400"}`}>
+                          {previewRun.total_defects}
+                        </div>
+                      )
+                    ) : (
+                      <div className={`text-xl font-bold tabular-nums ${previewRun.total_defects > 0 ? "text-red-400" : "text-green-400"}`}>
+                        {previewRun.total_defects}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {previewFile && (
+                <div className="shrink-0 p-4 border-b border-dash">
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] font-medium dash-text-muted uppercase tracking-wide mb-1">Current File</div>
+                      <div
+                        className="text-sm dash-text-primary truncate font-semibold leading-snug"
+                        title={previewFile.filename}
+                      >
+                        {previewFile.filename}
+                      </div>
+                    </div>
+                    {!isDjiThermalScanUpload && runDisplayType(previewRun) !== "thermal" && (
+                      <DetectionClassFilterDropdown
+                        filterClassKeys={clsFilter.filterClassKeys}
+                        hiddenSet={clsFilter.hiddenSet}
+                        open={clsFilter.open}
+                        setOpen={clsFilter.setOpen}
+                        anchorRef={clsFilter.anchorRef}
+                        toggleKey={clsFilter.toggleKey}
+                        showAll={clsFilter.showAll}
+                        hideAll={clsFilter.hideAll}
+                        liveOverlayEnabled={runsPreviewShowLiveOverlay}
+                      />
+                    )}
+                  </div>
+
+                  {previewRun.type !== "video" && previewFile.stats && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="dash-text-muted">Processing time</span>
+                      <span className="dash-text-primary font-semibold tabular-nums">
+                        {previewFile.stats.processing_time_ms}ms
+                      </span>
+                    </div>
+                  )}
+
+                  {previewRun.type === "video" && (
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="dash-text-muted">Duration</span>
+                        <span className="dash-text-primary font-semibold tabular-nums">{formatDuration(previewFile.duration || 0)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="dash-text-muted">FPS</span>
+                        <span className="dash-text-primary font-semibold tabular-nums">{previewFile.fps || 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="dash-text-muted">Frames analyzed</span>
+                        <span className="dash-text-primary font-semibold tabular-nums">{previewFile.frames_analyzed || 0}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {previewRun.type === "video" &&
+                  previewFile &&
+                  videoDetectionsLoading &&
+                  previewDetectionRows.length === 0 &&
+                  (previewFile.total_detections || 0) > 0 && (
+                    <div className="p-4 text-xs dash-text-subtle">Loading defect list…</div>
+                  )}
+
+                {previewFile && previewSidebarPartition &&
+                  (previewSidebarPartition.components.length > 0 || previewSidebarPartition.defects.length > 0) && (
+                    <DetectionSidebarBucketPanels partition={previewSidebarPartition} hideRowCounts />
+                  )}
+              </div>
+            </div>
           </div>
         </div>
       , document.body)

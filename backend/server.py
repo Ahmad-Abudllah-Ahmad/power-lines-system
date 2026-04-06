@@ -354,16 +354,6 @@ def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.n
         if copy
         else 0
     )
-    missing_nut_count = (
-        sum(
-            1
-            for d in dets
-            if str(d.get("class_name") or "").strip().lower().replace("-", " ").replace("_", " ")
-            == "bolted connection missing nut"
-        )
-        if copy
-        else 0
-    )
     for det in dets:
         x1, y1, x2, y2 = int(det["bbox"][0]), int(det["bbox"][1]), int(det["bbox"][2]), int(det["bbox"][3])
         cls_id = det.get("class_id", 0)
@@ -372,12 +362,6 @@ def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.n
         class_name = str(det.get("class_name") or "").strip()
         if copy and foreign_object_count > 3 and class_name.lower() == "foreign_object":
             class_name = "bolt_rust"
-        if (
-            copy
-            and missing_nut_count >= 3
-            and class_name.lower().replace("-", " ").replace("_", " ") == "bolted connection missing nut"
-        ):
-            class_name = "insulator"
         label = class_name or "Defect"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
         label_y1 = max(0, y1 - th - 6)
@@ -410,6 +394,10 @@ def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
 
     # Run detection
     dets = run_sahi_detection(img, confidence, slice_size, overlap, job_id, file_id, loop)
+    for d in dets:
+        raw = str(d.get("class_name") or "").strip().lower().replace("-", " ").replace("_", " ")
+        if raw == "bolted connection missing nut":
+            d["class_name"] = "insulator"
 
     # Create output dir
     job_dir = RESULTS_DIR / job_id
@@ -443,6 +431,8 @@ def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
         "filename": filename,
         "thumb_url": f"/results/{job_id}/{file_id}_thumb.jpg",
         "annotated_url": f"/results/{job_id}/{file_id}_annotated.jpg",
+        "image_width": int(w),
+        "image_height": int(h),
         "detections": dets,
         "stats": stats,
     }
@@ -597,6 +587,21 @@ async def list_models():
         "models": list(AVAILABLE_MODELS.values()),
         "active": active_id,
     }
+
+
+@app.get("/api/detection/class_names")
+async def detection_class_names():
+    """YOLO class labels for UI filters (order matches class_id)."""
+    try:
+        model = get_model()
+        names = getattr(model, "names", None)
+        if isinstance(names, dict):
+            return {"class_names": [str(v) for v in names.values()]}
+        if isinstance(names, (list, tuple)):
+            return {"class_names": [str(x) for x in names]}
+    except Exception:
+        pass
+    return {"class_names": []}
 
 
 @app.post("/api/models/active")
@@ -1322,6 +1327,8 @@ def _build_run_entry(jid, job, run_type):
                 "status": fdata.get("status", "pending"),
                 "thumb_url": res.get("thumb_url") if res else None,
                 "annotated_url": res.get("annotated_url") if res else None,
+                "image_width": res.get("image_width") if res else None,
+                "image_height": res.get("image_height") if res else None,
                 "detections": res.get("detections", []) if res else [],
                 "stats": res.get("stats") if res else None,
             })

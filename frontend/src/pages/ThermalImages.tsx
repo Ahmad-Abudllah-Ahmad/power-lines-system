@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
+import { DETECTION_FILE_GRID_CLASS } from "../components/DetectionClassFilter";
 
 const POLL_MS = 2000;
 
@@ -979,7 +980,7 @@ export default function ThermalImages({ embedded = false }: ThermalImagesProps) 
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className={DETECTION_FILE_GRID_CLASS}>
             {Array.from(cards.entries()).map(([key, card]) => (
               <div
                 key={key}

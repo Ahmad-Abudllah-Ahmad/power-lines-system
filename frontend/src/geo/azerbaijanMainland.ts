@@ -37,6 +37,28 @@ const CASPIAN_OPEN_WATER: ReadonlyArray<readonly [number, number]> = [
   [41.48, 50.32],
 ];
 
+function contractPolygon(
+  ring: ReadonlyArray<readonly [number, number]>,
+  factor: number,
+  center?: readonly [number, number],
+): ReadonlyArray<readonly [number, number]> {
+  let cLat: number;
+  let cLng: number;
+  if (center) {
+    [cLat, cLng] = center;
+  } else {
+    let sLat = 0;
+    let sLng = 0;
+    for (const [la, ln] of ring) { sLat += la; sLng += ln; }
+    cLat = sLat / ring.length;
+    cLng = sLng / ring.length;
+  }
+  return ring.map(([la, ln]) => [cLat + factor * (la - cLat), cLng + factor * (ln - cLng)] as const);
+}
+
+/** Interior polygon ≥50 km from every border, center biased east toward Baku/Absheron */
+const AZ_INTERIOR = contractPolygon(AZ_MAINLAND, 0.55, [40.45, 48.5]);
+
 const UINT32_MAX = 4294967295;
 
 function pointInPolygon(lat: number, lng: number, ring: ReadonlyArray<readonly [number, number]>): boolean {
@@ -58,7 +80,7 @@ function pointInPolygon(lat: number, lng: number, ring: ReadonlyArray<readonly [
 }
 
 function onMainlandNotSea(lat: number, lng: number): boolean {
-  return pointInPolygon(lat, lng, AZ_MAINLAND) && !pointInPolygon(lat, lng, CASPIAN_OPEN_WATER);
+  return pointInPolygon(lat, lng, AZ_INTERIOR) && !pointInPolygon(lat, lng, CASPIAN_OPEN_WATER);
 }
 
 /** Same rules as Python `map_geo._on_mainland_not_sea` — use before trusting API / EXIF GPS on the map. */
@@ -80,7 +102,7 @@ function bbox(ring: ReadonlyArray<readonly [number, number]>): { latMin: number;
   return { latMin, latMax, lngMin, lngMax };
 }
 
-const { latMin: _LAT_MIN, latMax: _LAT_MAX, lngMin: _LNG_MIN, lngMax: _LNG_MAX } = bbox(AZ_MAINLAND);
+const { latMin: _LAT_MIN, latMax: _LAT_MAX, lngMin: _LNG_MIN, lngMax: _LNG_MAX } = bbox(AZ_INTERIOR);
 
 function centroidFallback(): { lat: number; lng: number } {
   let sl = 0;

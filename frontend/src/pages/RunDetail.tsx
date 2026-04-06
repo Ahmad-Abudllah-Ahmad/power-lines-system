@@ -12,6 +12,11 @@ import {
 } from "../api/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { toast } from "../components/Toast";
+import {
+  RGB_PREVIEW_ZOOM_MAX,
+  RGB_PREVIEW_ZOOM_MIN,
+  RGB_PREVIEW_ZOOM_STEP,
+} from "../components/DetectionClassFilter";
 import { formatDetectionLabel } from "../utils/formatLabels";
 import {
   Download,
@@ -796,7 +801,9 @@ export default function RunDetail() {
             <span className="flex items-center gap-1 rounded-lg border border-neutral-600" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
               <button
                 type="button"
-                onClick={() => setModalZoom((z) => Math.max(0.25, z - 0.25))}
+                onClick={() =>
+                  setModalZoom((z) => Math.max(RGB_PREVIEW_ZOOM_MIN, z - RGB_PREVIEW_ZOOM_STEP))
+                }
                 className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-l-md"
                 aria-label="Zoom out"
               >
@@ -805,7 +812,9 @@ export default function RunDetail() {
               <span className="px-2 text-sm dash-text-body min-w-[3rem] text-center">{Math.round(modalZoom * 100)}%</span>
               <button
                 type="button"
-                onClick={() => setModalZoom((z) => Math.min(3, z + 0.25))}
+                onClick={() =>
+                  setModalZoom((z) => Math.min(RGB_PREVIEW_ZOOM_MAX, z + RGB_PREVIEW_ZOOM_STEP))
+                }
                 className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-r-md"
                 aria-label="Zoom in"
               >
@@ -815,13 +824,13 @@ export default function RunDetail() {
           </div>
 
           <div
-            className="flex items-center justify-center overflow-auto max-w-full max-h-[90vh]"
+            className="flex items-center justify-center overflow-auto scrollbar-gutter-stable max-w-full max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
             <img
               src={overlayFileUrl(runId, fullSizeOverlay)}
               alt={fullSizeOverlay}
-              className="rounded-lg shadow-2xl object-contain transition-transform origin-center"
+              className="rounded-lg shadow-2xl object-contain transition-[transform] duration-150 ease-out origin-center"
               style={{ transform: `scale(${modalZoom})` }}
               draggable={false}
             />

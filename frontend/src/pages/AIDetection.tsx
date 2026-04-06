@@ -5,7 +5,19 @@ import ThermalImages from "./ThermalImages";
 import MediaUploadBox from "../components/MediaUploadBox";
 import UploadPipelineStrip from "../components/UploadPipelineStrip";
 import { toast } from "../components/Toast";
-import { formatDetectionLabel } from "../utils/formatLabels";
+import {
+  partitionDetectionsSidebarBuckets,
+  formatDetectionSidebarLabel,
+} from "../utils/detectionSidebarBuckets";
+import {
+  DetectionClassFilterDropdown,
+  DETECTION_FILE_GRID_CLASS,
+  RGB_PREVIEW_ZOOM_MAX,
+  RGB_PREVIEW_ZOOM_MIN,
+  RGB_PREVIEW_ZOOM_STEP,
+  useDetectionClassFilterForRows,
+  useRgbPreviewDetectionOverlay,
+} from "../components/DetectionClassFilter";
 import {
   Upload,
   Camera,
@@ -62,6 +74,8 @@ type CardData = {
   progressLabel: string;
   thumbUrl?: string;
   annotatedUrl?: string;
+  imageWidth?: number;
+  imageHeight?: number;
   detections: Detection[];
   stats?: DetectionStats;
   error?: string;
@@ -86,6 +100,8 @@ export default function AIDetection() {
   const [previewConfFilter, setPreviewConfFilter] = useState(0);
   const [dragActive, setDragActive] = useState(false);
   const [modalZoom, setModalZoom] = useState(1);
+  const previewImgRef = useRef<HTMLImageElement | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const DEFAULT_MODELS: ModelInfo[] = [
     {
       id: "tl_defect_industrial",
@@ -278,6 +294,8 @@ export default function AIDetection() {
             progressLabel: "Complete",
             thumbUrl: r.thumb_url,
             annotatedUrl: r.annotated_url,
+            imageWidth: typeof r.image_width === "number" ? r.image_width : undefined,
+            imageHeight: typeof r.image_height === "number" ? r.image_height : undefined,
             detections: r.detections || [],
             stats: r.stats,
           });
@@ -360,6 +378,8 @@ export default function AIDetection() {
             progressLabel: "Complete",
             thumbUrl: d.thumb_url,
             annotatedUrl: d.annotated_url,
+            imageWidth: typeof d.image_width === "number" ? d.image_width : undefined,
+            imageHeight: typeof d.image_height === "number" ? d.image_height : undefined,
             detections: d.detections || [],
             stats: d.stats,
           });
@@ -532,39 +552,27 @@ export default function AIDetection() {
     return previewCard.detections.filter(d => d.confidence >= previewConfFilter);
   }, [previewCard, previewConfFilter]);
 
-  const foreignObjectCount = useMemo(() => {
-    const all = previewCard?.detections;
-    if (!Array.isArray(all) || all.length === 0) return 0;
-    let n = 0;
-    for (const d of all) {
-      const name = String(d?.class_name ?? "").trim().toLowerCase();
-      if (name === "foreign_object") n += 1;
-    }
-    return n;
-  }, [previewCard?.detections]);
+  const clsFilter = useDetectionClassFilterForRows(previewDetections, previewId);
 
-  const missingNutCount = useMemo(() => {
-    const all = previewCard?.detections;
-    if (!Array.isArray(all) || all.length === 0) return 0;
-    let n = 0;
-    for (const d of all) {
-      const name = String(d?.class_name ?? "")
-        .trim()
-        .toLowerCase()
-        .replaceAll("-", " ")
-        .replaceAll("_", " ");
-      if (name === "bolted connection missing nut") n += 1;
-    }
-    return n;
-  }, [previewCard?.detections]);
+  const previewSidebarBuckets = useMemo(
+    () => partitionDetectionsSidebarBuckets(clsFilter.filteredRows as Detection[]),
+    [clsFilter.filteredRows]
+  );
 
-  const displayClassName = useCallback((raw: unknown) => {
-    const name = String(raw ?? "").trim();
-    const norm = name.toLowerCase().replaceAll("-", " ").replaceAll("_", " ");
-    if (detectionMode === "rgb" && foreignObjectCount > 3 && norm === "foreign object") return "bolt_rust";
-    if (detectionMode === "rgb" && missingNutCount >= 3 && norm === "bolted connection missing nut") return "insulator";
-    return name;
-  }, [detectionMode, foreignObjectCount, missingNutCount]);
+  const previewHasSourceDims =
+    (previewCard?.imageWidth ?? 0) > 0 && (previewCard?.imageHeight ?? 0) > 0;
+  const previewBaseSrc = previewHasSourceDims
+    ? previewCard?.thumbUrl || previewCard?.localPreview
+    : previewCard?.annotatedUrl || previewCard?.thumbUrl || previewCard?.localPreview;
+
+  useRgbPreviewDetectionOverlay(previewImgRef, previewCanvasRef, {
+    enabled: Boolean(previewCard && previewHasSourceDims),
+    sourceW: previewCard?.imageWidth ?? 0,
+    sourceH: previewCard?.imageHeight ?? 0,
+    detections: clsFilter.filteredRows as Detection[],
+    imageUrlKey: previewBaseSrc ?? "",
+    modalZoom,
+  });
 
   return (
     <div className="space-y-6">
@@ -791,7 +799,7 @@ export default function AIDetection() {
               })()}
             </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+          <div className={DETECTION_FILE_GRID_CLASS}>
             {Array.from(cards.entries()).map(([key, card]) => (
               <div
                 key={key}
@@ -963,7 +971,13 @@ export default function AIDetection() {
       {/* Preview Modal */}
       {previewId && previewCard && (
         <div className="fixed inset-0 z-50 bg-[var(--dash-overlay-scrim)] flex" onClick={() => setPreviewId(null)}>
-          <button onClick={() => setPreviewId(null)} className="absolute top-4 right-4 z-10 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
+          <button
+            type="button"
+            onClick={() => setPreviewId(null)}
+            className="absolute top-4 z-20 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem)]"
+            style={{ backgroundColor: "var(--dash-elevated-bg)" }}
+            aria-label="Close preview"
+          >
             <X size={24} />
           </button>
 
@@ -978,7 +992,7 @@ export default function AIDetection() {
               </button>
               <button
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute right-[340px] top-1/2 -translate-y-1/2 z-10 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem+3.5rem)]"
                 style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronRight size={24} />
@@ -987,46 +1001,96 @@ export default function AIDetection() {
           )}
 
           {/* Image */}
-          <div className="flex-1 flex items-center justify-center overflow-auto p-8" onClick={e => e.stopPropagation()}>
+          <div
+            className="flex-1 flex items-center justify-center overflow-auto scrollbar-gutter-stable p-8"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="relative max-w-full max-h-full">
               <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-lg border border-[var(--dash-panel-border)]" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
-                <button onClick={() => setModalZoom(z => Math.max(0.25, z - 0.25))} className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-l-lg"><ZoomOut size={16} /></button>
+                <button
+                  onClick={() =>
+                    setModalZoom((z) => Math.max(RGB_PREVIEW_ZOOM_MIN, z - RGB_PREVIEW_ZOOM_STEP))
+                  }
+                  className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-l-lg"
+                >
+                  <ZoomOut size={16} />
+                </button>
                 <span className="px-2 text-xs dash-text-body min-w-[3rem] text-center">{Math.round(modalZoom * 100)}%</span>
-                <button onClick={() => setModalZoom(z => Math.min(3, z + 0.25))} className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)]"><ZoomIn size={16} /></button>
+                <button
+                  onClick={() =>
+                    setModalZoom((z) => Math.min(RGB_PREVIEW_ZOOM_MAX, z + RGB_PREVIEW_ZOOM_STEP))
+                  }
+                  className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)]"
+                >
+                  <ZoomIn size={16} />
+                </button>
                 <button onClick={() => setModalZoom(1)} className="p-1.5 dash-text-primary hover:bg-[var(--dash-hover-bg)] rounded-r-lg border-l border-[var(--dash-panel-border)]"><RotateCcw size={14} /></button>
               </div>
               <div className="absolute top-2 right-2 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
                 {previewIndex + 1} / {completedCards.length}
               </div>
-              <img
-                src={previewCard.annotatedUrl || previewCard.thumbUrl || previewCard.localPreview}
-                alt={previewCard.filename}
-                className="rounded-lg shadow-2xl object-contain max-h-[85vh] transition-transform"
-                style={{ transform: `scale(${modalZoom})`, transformOrigin: "center" }}
-                draggable={false}
-              />
+              <div
+                className="relative inline-block transition-[transform] duration-150 ease-out"
+                style={{ transform: `scale(${modalZoom})`, transformOrigin: "center center" }}
+              >
+                <img
+                  ref={previewImgRef}
+                  src={previewBaseSrc || ""}
+                  alt={previewCard.filename}
+                  className="block max-h-[85vh] w-auto rounded-lg object-contain shadow-2xl"
+                  draggable={false}
+                />
+                {previewHasSourceDims ? (
+                  <canvas
+                    ref={previewCanvasRef}
+                    className="pointer-events-none absolute inset-0 h-full w-full rounded-lg"
+                    aria-hidden
+                  />
+                ) : null}
+              </div>
             </div>
           </div>
 
           {/* Detail Panel */}
           <div className="w-[320px] border-l border-[var(--dash-panel-border)] overflow-y-auto flex flex-col" onClick={e => e.stopPropagation()} style={{ backgroundColor: "var(--dash-modal-aside)" }}>
             <div className="p-4 border-b border-[var(--dash-panel-border)]">
-              <div className="text-lg font-bold dash-text-primary truncate" title={previewCard.filename}>{previewCard.filename}</div>
-              <div className="flex items-center gap-2 mt-2">
-                <span className="px-2 py-0.5 rounded text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/50">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1 text-lg font-bold dash-text-primary truncate" title={previewCard.filename}>
+                  {previewCard.filename}
+                </div>
+                <DetectionClassFilterDropdown
+                  filterClassKeys={clsFilter.filterClassKeys}
+                  hiddenSet={clsFilter.hiddenSet}
+                  open={clsFilter.open}
+                  setOpen={clsFilter.setOpen}
+                  anchorRef={clsFilter.anchorRef}
+                  toggleKey={clsFilter.toggleKey}
+                  showAll={clsFilter.showAll}
+                  hideAll={clsFilter.hideAll}
+                  liveOverlayEnabled={previewHasSourceDims}
+                />
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="rounded border border-cyan-500/50 bg-cyan-500/20 px-2 py-0.5 text-xs font-bold text-cyan-300">
                   RGB
                 </span>
-                {previewCard.stats?.processing_time_ms && (
+                {previewCard.stats?.processing_time_ms ? (
                   <span className="text-xs dash-text-muted">{(previewCard.stats.processing_time_ms / 1000).toFixed(1)}s</span>
-                )}
+                ) : null}
               </div>
             </div>
 
             {previewCard.stats && (
               <div className="p-4 border-b border-[var(--dash-panel-border)] grid grid-cols-2 gap-3">
                 <div>
-                  <div className="text-xs dash-text-muted">Total Defects</div>
-                  <div className="text-xl font-bold dash-text-primary">{previewCard.stats.total_defects}</div>
+                  <div className="text-xs dash-text-muted">Components</div>
+                  <div className="text-xl font-bold dash-text-primary">{previewSidebarBuckets.components.length}</div>
+                </div>
+                <div>
+                  <div className="text-xs dash-text-muted">Defects</div>
+                  <div className={`text-xl font-bold ${previewSidebarBuckets.defects.length > 0 ? "text-red-400" : "text-green-400"}`}>
+                    {previewSidebarBuckets.defects.length}
+                  </div>
                 </div>
               </div>
             )}
@@ -1055,25 +1119,32 @@ export default function AIDetection() {
                     : "No detections above threshold"}
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {previewDetections.map((det, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-lg border border-[var(--dash-panel-border)] p-3"
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-sm font-semibold dash-text-primary">
-                          {formatDetectionLabel(displayClassName(det.class_name))}
-                        </span>
-                      </div>
-
-                      {det.source && (
-                        <div className="text-[10px] dash-text-subtle mt-1">
-                          Source: {det.source === "sahi" ? "SAHI Slice" : "Full Image"}
+                <div className="space-y-3">
+                  {(
+                    [
+                      { title: "Components", prefix: "c", items: previewSidebarBuckets.components },
+                      { title: "Defects", prefix: "d", items: previewSidebarBuckets.defects },
+                    ] as const
+                  ).map(
+                    ({ title, prefix, items }) =>
+                      items.length > 0 && (
+                        <div key={title}>
+                          <div className="text-xs font-semibold dash-text-body mb-1.5">{title}</div>
+                          <div className="space-y-1">
+                            {items.map(({ key }) => (
+                              <div
+                                key={`${prefix}-${key}`}
+                                className="flex items-center py-1 text-xs rounded-lg border border-[var(--dash-panel-border)] px-3"
+                              >
+                                <span className="min-w-0 truncate dash-text-primary" title={formatDetectionSidebarLabel(key)}>
+                                  {formatDetectionSidebarLabel(key)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      )
+                  )}
                 </div>
               )}
             </div>
