@@ -36,6 +36,8 @@ import {
   type ThermalAnalysisData,
 } from "../components/ThermalAnalysisDetailModal";
 import {
+  applyBreakageAngleBraceRename,
+  filterRowsForRgbPreviewOverlay,
   partitionDetectionsSidebarBuckets,
   previewDetectionRowsForFile,
   uniqueDefectTypeCount,
@@ -263,6 +265,7 @@ type DashboardRunFile = {
   source?: string;
   thumb_url?: string | null;
   annotated_url?: string | null;
+  clean_url?: string | null;
   image_width?: number | null;
   image_height?: number | null;
   video_url?: string | null;
@@ -367,17 +370,19 @@ function RecentBatchUploadDetailModal({
   const ih = typeof cur?.image_height === "number" ? cur.image_height : 0;
   const previewHasSourceDims = iw > 0 && ih > 0;
   const thumbResolved = cur?.thumb_url ? resolveMediaSrc(cur.thumb_url) : "";
-  const mainImg =
-    !videoSrc && previewHasSourceDims && thumbResolved
-      ? thumbResolved
-      : resolveMediaSrc(cur?.annotated_url || cur?.thumb_url);
+  const annotatedResolved = cur?.annotated_url ? resolveMediaSrc(cur.annotated_url) : "";
+  const cleanResolved = cur?.clean_url ? resolveMediaSrc(cur.clean_url) : "";
+  const previewOverlaySrc = annotatedResolved || thumbResolved;
+  const mainImg = annotatedResolved || thumbResolved;
 
   const runKind = isVideoJob ? ("video" as const) : ("image" as const);
-  const previewDetectionRows = previewDetectionRowsForFile(
-    runKind,
-    cur?.detections as unknown[] | undefined,
-    batchDetailVideoDets
-  ) as DetectionRowLike[];
+  const previewDetectionRows = applyBreakageAngleBraceRename(
+    previewDetectionRowsForFile(
+      runKind,
+      cur?.detections as unknown[] | undefined,
+      batchDetailVideoDets
+    ) as DetectionRowLike[]
+  );
 
   const batchClassKeySourceRows = useMemo(() => {
     const out: DetectionRowLike[] = [];
@@ -402,16 +407,25 @@ function RecentBatchUploadDetailModal({
     return partitionDetectionsSidebarBuckets(clsFilter.filteredRows);
   }, [previewDetectionRows, clsFilter.filteredRows]);
 
-  const overlayDetections = clsFilter.filteredRows.filter(
-    (d) => Array.isArray(d.bbox) && d.bbox.length >= 4
-  ) as Array<{ bbox: number[]; class_name?: string; label?: string }>;
+  const overlayDetections = filterRowsForRgbPreviewOverlay(
+    previewDetectionRows,
+    clsFilter.hiddenSet
+  ).filter((d) => Array.isArray(d.bbox) && d.bbox.length >= 4) as Array<{
+    bbox: number[];
+    class_name?: string;
+    label?: string;
+  }>;
+
+  const dashFilteredImgSrc = clsFilter.hiddenSet.size > 0
+    ? (cleanResolved || thumbResolved)
+    : previewOverlaySrc;
 
   useRgbPreviewDetectionOverlay(batchDetailPreviewImgRef, batchDetailPreviewCanvasRef, {
-    enabled: Boolean(!videoSrc && previewHasSourceDims && thumbResolved),
+    enabled: Boolean(!videoSrc && previewHasSourceDims && previewOverlaySrc),
     sourceW: iw,
     sourceH: ih,
     detections: overlayDetections,
-    imageUrlKey: `${runId}:${safeIdx}:${thumbResolved}`,
+    imageUrlKey: `${runId}:${safeIdx}:${dashFilteredImgSrc}`,
     modalZoom: batchDetailImgZoom,
   });
 
@@ -427,7 +441,8 @@ function RecentBatchUploadDetailModal({
     onFileIndexChange(Math.max(0, Math.min(i, n - 1)));
   };
 
-  const showLiveThumbOverlay = !videoSrc && previewHasSourceDims && Boolean(thumbResolved);
+  const showLiveThumbOverlay =
+    !videoSrc && previewHasSourceDims && Boolean(previewOverlaySrc);
 
   return (
     <div
@@ -671,7 +686,7 @@ function RecentBatchUploadDetailModal({
                     <>
                       <img
                         ref={batchDetailPreviewImgRef}
-                        src={thumbResolved}
+                        src={dashFilteredImgSrc}
                         alt={cur?.filename ?? ""}
                         className="max-h-[min(85vh,820px)] max-w-full object-contain rounded-xl border border-[var(--dash-preview-border)] block shadow-lg"
                         draggable={false}
@@ -783,18 +798,18 @@ function RecentBatchUploadDetailModal({
               <div className="text-[11px] dash-text-muted mt-1">{shortAgo(created)}</div>
             </div>
 
-            {/* Stats grid */}
+            {/* Stats: top row Total files | Completed; full-width Detections below (reference layout) */}
             <div className="grid grid-cols-2 gap-2 text-center">
-              <div className="dash-nested rounded-lg p-3">
+              <div className="dash-nested rounded-lg p-3 min-w-0">
                 <div className="text-[10px] dash-text-subtle uppercase tracking-wide mb-1">Total files</div>
                 <div className="text-xl font-semibold dash-text-primary tabular-nums">{totalFiles}</div>
               </div>
-              <div className="dash-nested rounded-lg p-3">
+              <div className="dash-nested rounded-lg p-3 min-w-0">
                 <div className="text-[10px] dash-text-subtle uppercase tracking-wide mb-1">Completed</div>
                 <div className="text-xl font-semibold text-emerald-400 tabular-nums">{completed}</div>
               </div>
-              <div className="col-span-2 dash-nested rounded-lg p-3">
-                <div className="text-[10px] dash-text-subtle uppercase tracking-wide mb-1">Detections</div>
+              <div className="col-span-2 dash-nested rounded-lg p-3 min-w-0">
+                <div className="text-xs dash-text-subtle font-medium uppercase tracking-wide mb-1">Detections</div>
                 {isVideoJob &&
                 previewDetectionRows.length === 0 &&
                 (cur?.total_detections ?? 0) > 0 &&
@@ -802,12 +817,12 @@ function RecentBatchUploadDetailModal({
                   <div className="text-sm font-semibold dash-text-subtle mt-0.5 animate-pulse">Loading…</div>
                 ) : previewSidebarPartition ? (
                   <div
-                    className={`text-sm font-semibold leading-snug mt-0.5 ${
+                    className={`flex flex-wrap items-center justify-center gap-x-4 text-sm font-semibold leading-snug mt-0.5 ${
                       previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-emerald-400"
                     }`}
                   >
-                    <div>{previewSidebarPartition.components.length} components</div>
-                    <div>{previewSidebarPartition.defects.length} defects</div>
+                    <span>{previewSidebarPartition.components.length} components</span>
+                    <span>{previewSidebarPartition.defects.length} defects</span>
                   </div>
                 ) : (
                   <div

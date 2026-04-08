@@ -999,29 +999,29 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
               <div className="text-xs dash-text-subtle mt-1">{timeAgoJob(jobCreatedAt)}</div>
             </div>
 
-            <div className="p-4 border-b border-[var(--dash-panel-border)] grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-xs dash-text-muted">Total Files</div>
-                <div className="text-xl font-bold dash-text-primary">{sidebarBatchStats.totalFiles}</div>
+            <div className="p-4 border-b border-[var(--dash-panel-border)] grid grid-cols-2 gap-2 text-center">
+              <div className="rounded-lg border border-[var(--dash-panel-border)] p-3 min-w-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
+                <div className="text-[10px] dash-text-muted uppercase tracking-wide mb-1">Total Files</div>
+                <div className="text-xl font-bold dash-text-primary tabular-nums">{sidebarBatchStats.totalFiles}</div>
               </div>
-              <div>
-                <div className="text-xs dash-text-muted">Completed</div>
-                <div className="text-xl font-bold dash-text-primary">{sidebarBatchStats.completed}</div>
+              <div className="rounded-lg border border-[var(--dash-panel-border)] p-3 min-w-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
+                <div className="text-[10px] dash-text-muted uppercase tracking-wide mb-1">Completed</div>
+                <div className="text-xl font-bold dash-text-primary tabular-nums">{sidebarBatchStats.completed}</div>
               </div>
-              <div className="col-span-2">
-                <div className="text-xs dash-text-muted">Detections</div>
+              <div className="col-span-2 rounded-lg border border-[var(--dash-panel-border)] p-3 min-w-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
+                <div className="text-xs dash-text-muted font-medium uppercase tracking-wide mb-1">Detections</div>
                 {previewDetectionRows.length === 0 &&
                 (previewCard.totalDetections || 0) > 0 &&
                 videoDetectionsLoading ? (
                   <div className="mt-0.5 text-sm font-bold dash-text-subtle">Loading…</div>
                 ) : previewSidebarPartition ? (
                   <div
-                    className={`mt-0.5 text-sm font-bold leading-tight ${
+                    className={`mt-0.5 flex flex-wrap items-center justify-center gap-x-4 text-sm font-semibold leading-snug ${
                       previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-green-400"
                     }`}
                   >
-                    <div>{previewSidebarPartition.components.length} components</div>
-                    <div>{previewSidebarPartition.defects.length} defects</div>
+                    <span>{previewSidebarPartition.components.length} components</span>
+                    <span>{previewSidebarPartition.defects.length} defects</span>
                   </div>
                 ) : (
                   <div

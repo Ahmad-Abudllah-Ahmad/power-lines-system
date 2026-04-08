@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Filter, ChevronDown } from "lucide-react";
 import {
+  BBOX_SIZE_FILTER_EXEMPT_KEYS,
+  detectionClassKeysForSharedFilterToggle,
   formatDetectionSidebarLabel,
   normalizeDetectionClassKey,
 } from "../utils/detectionSidebarBuckets";
+import { rgbAnnotationTunablesFromDetections } from "../utils/rgbAnnotationLensAdjust";
 
 /** 3-column tile grid for RGB/thermal file lists and detection result cards (Dashboard, Runs, AIDetection, ThermalImages). */
 export const DETECTION_FILE_GRID_CLASS = "grid grid-cols-3 gap-2 sm:gap-3";
@@ -52,6 +55,10 @@ function serverStyleAnnotationLabel(row: DetectionRowLike, allRows: DetectionRow
   let raw = String(row.class_name ?? row.label ?? "").trim();
   if (foreignCount > 3 && normalizeDetectionClassKey(raw) === "foreign_object") {
     raw = "bolt_rust";
+  }
+  const normalized = normalizeDetectionClassKey(raw);
+  if (normalized === "conductor" || normalized === "foundation_pedestal") {
+    return "Foundation Padesteal";
   }
   return raw || "Defect";
 }
@@ -114,14 +121,24 @@ export function redrawRgbDetectionOverlay(
   const ty = nh / sourceH;
   /** Source pixel → CSS pixel scale (stroke/font scale with preview size). */
   const srcToCss = Math.min(tx, ty) * ctr;
-  const linePx = Math.max(1, srcToCss);
-  const fontPx = Math.max(8, Math.round(8 * srcToCss));
+  const lens = rgbAnnotationTunablesFromDetections(detections, sourceW, sourceH);
+  const scaleVis = lens.lineAndLabelScale;
+  const linePx = Math.max(1, srcToCss * scaleVis);
+  const fontPx = Math.max(8, Math.round(8 * srcToCss * scaleVis));
+  const padCss = srcToCss * scaleVis;
 
   for (const d of detections) {
     const b = d.bbox;
     if (!Array.isArray(b) || b.length < 4) continue;
     const [x1, y1, x2, y2] = b;
     if (![x1, y1, x2, y2].every((n) => Number.isFinite(n))) continue;
+    const cls = normalizeDetectionClassKey(d.class_name ?? d.label);
+    if (!BBOX_SIZE_FILTER_EXEMPT_KEYS.has(cls)) {
+      const bw = Math.abs(x2 - x1);
+      const bh = Math.abs(y2 - y1);
+      const areaRatio = (bw * bh) / (sourceW * sourceH);
+      if (areaRatio > lens.areaSkipAbove && bh < bw * 3) continue;
+    }
     const rx = ox + x1 * tx * ctr;
     const ry = oy + y1 * ty * ctr;
     const rw = (x2 - x1) * tx * ctr;
@@ -138,16 +155,16 @@ export function redrawRgbDetectionOverlay(
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     const tw = ctx.measureText(label).width;
-    const labelBgW = tw + 4 * srcToCss;
-    const labelBgH = fontPx + 4 * srcToCss;
+    const labelBgW = tw + 4 * padCss;
+    const labelBgH = fontPx + 4 * padCss;
     let labelTop = ry - labelBgH;
     if (labelTop < oy + 2) {
-      labelTop = ry + rh + 2 * srcToCss;
+      labelTop = ry + rh + 2 * padCss;
     }
     ctx.fillStyle = color;
     ctx.fillRect(rx, labelTop, labelBgW, labelBgH);
     ctx.fillStyle = "rgb(0, 0, 0)";
-    ctx.fillText(label, rx + 2 * srcToCss, labelTop + labelBgH / 2);
+    ctx.fillText(label, rx + 2 * padCss, labelTop + labelBgH / 2);
   }
 }
 
@@ -206,9 +223,16 @@ export function useDetectionClassFilterForRows(
   }, [open]);
 
   const toggleKey = useCallback((key: string) => {
-    setHiddenClassKeys((prev) =>
-      prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key].sort()
-    );
+    const group = detectionClassKeysForSharedFilterToggle(key);
+    setHiddenClassKeys((prev) => {
+      const willHide = !prev.includes(key);
+      if (willHide) {
+        const next = new Set(prev);
+        for (const k of group) next.add(k);
+        return [...next].sort();
+      }
+      return prev.filter((x) => !group.includes(x));
+    });
   }, []);
 
   const showAll = useCallback(() => setHiddenClassKeys([]), []);

@@ -37,7 +37,13 @@ import {
 } from "lucide-react";
 import { API_BASE } from "../api/api";
 import {
+  applyBreakageAngleBraceRename,
+  BBOX_SIZE_FILTER_EXEMPT_KEYS,
+  filterRowsForRgbPreviewOverlay,
+  formatDetectionSidebarLabel,
+  normalizeDetectionClassKey,
   partitionDetectionsSidebarBuckets,
+  SIDEBAR_HIDDEN_CLASS_KEYS,
   uniqueDefectTypeCount,
   previewDetectionRowsForFile,
 } from "../utils/detectionSidebarBuckets";
@@ -51,6 +57,8 @@ import {
   useDetectionClassFilterForRows,
   useRgbPreviewDetectionOverlay,
 } from "../components/DetectionClassFilter";
+import { rgbAnnotationTunablesFromDetections } from "../utils/rgbAnnotationLensAdjust";
+import { useRgbPreviewPan } from "../utils/useRgbPreviewPan";
 
 function resolveThermalFetchUrl(u: string): string {
   if (!u) return "";
@@ -80,6 +88,8 @@ type FileInfo = {
   frames_analyzed?: number;
   avg_confidence?: number;
   max_confidence?: number;
+  /** EXIF GPS at upload (same values as map / CorridorMap per-image picker). */
+  gps?: { lat: number; lng: number } | null;
 };
 
 type RunEntry = {
@@ -87,6 +97,8 @@ type RunEntry = {
   type: "image" | "video" | "thermal";
   /** DJI thermal batch from `/api/thermal/batch/*` — merged into `/api/runs`. */
   thermal_analysis_job?: boolean;
+  /** Batch map pin: first image if ≤2 files, else mean of all images with GPS. */
+  gps?: { lat: number; lng: number };
   status: string;
   total_files: number;
   completed: number;
@@ -511,6 +523,11 @@ export default function Runs() {
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const appliedBatchRef = useRef<string | null>(null);
   const [previewModalZoom, setPreviewModalZoom] = useState(1);
+  const rgbPreviewPan = useRgbPreviewPan(
+    previewModalZoom,
+    previewRun ? `${previewRun.run_id}:${previewFileIdx}` : null,
+    "mx-auto max-w-full"
+  );
   const [fileReviewStatusByRun, setFileReviewStatusByRun] = useState<Record<string, Record<string, "approved" | "canceled" | undefined>>>(() => {
     try {
       const raw = localStorage.getItem("runs_file_review_status_v1");
@@ -765,9 +782,25 @@ export default function Runs() {
       });
       if (!isThermalReportRun) for (const f of imageFiles) {
         const dets = Array.isArray(f.detections) ? f.detections : [];
+        const srcW = typeof f.image_width === "number" ? f.image_width : 0;
+        const srcH = typeof f.image_height === "number" ? f.image_height : 0;
+        const lens = srcW > 0 && srcH > 0 ? rgbAnnotationTunablesFromDetections(dets as Array<{ bbox?: number[] }>, srcW, srcH) : null;
         const boxes = dets
+          .filter((d: any) => {
+            const cls = normalizeDetectionClassKey(String(d?.class_name ?? d?.label ?? ""));
+            if (SIDEBAR_HIDDEN_CLASS_KEYS.has(cls)) return false;
+            if (lens && Array.isArray(d?.bbox) && d.bbox.length >= 4 && !BBOX_SIZE_FILTER_EXEMPT_KEYS.has(cls)) {
+              const bw = Math.abs(d.bbox[2] - d.bbox[0]);
+              const bh = Math.abs(d.bbox[3] - d.bbox[1]);
+              const areaRatio = (bw * bh) / (srcW * srcH);
+              if (areaRatio > lens.areaSkipAbove && bh < bw * 3) return false;
+            }
+            return true;
+          })
           .map((d: any) => ({
-            label: String(d?.class_name ?? d?.label ?? "Defect"),
+            label: formatDetectionSidebarLabel(
+              normalizeDetectionClassKey(String(d?.class_name ?? d?.label ?? "Defect"))
+            ),
             conf: typeof d?.confidence === "number" ? d.confidence : typeof d?.conf === "number" ? d.conf : null,
             bbox: Array.isArray(d?.bbox) ? d.bbox : null,
           }))
@@ -1122,7 +1155,8 @@ ${pdfPageChunks.join("\n")}
 
   const previewDetectionRows = useMemo(() => {
     if (!previewRun || !previewFile) return [];
-    return previewDetectionRowsForFile(previewRun.type, previewFile.detections, videoFetchedDetections);
+    const rows = previewDetectionRowsForFile(previewRun.type, previewFile.detections, videoFetchedDetections);
+    return applyBreakageAngleBraceRename(rows as Array<{ class_name?: string; label?: string }>);
   }, [previewRun, previewFile, videoFetchedDetections]);
 
   const previewClassFilterResetKey =
@@ -1143,22 +1177,34 @@ ${pdfPageChunks.join("\n")}
   const runsPreviewSourceH = typeof previewFile?.image_height === "number" ? previewFile.image_height : 0;
   const runsPreviewHasSourceDims = runsPreviewSourceW > 0 && runsPreviewSourceH > 0;
   const runsPreviewThumbSrc = previewFile?.thumb_url?.trim() || "";
+  const runsPreviewAnnotatedSrc = previewFile?.annotated_url?.trim() || "";
+  const runsPreviewCleanSrc = (previewFile as Record<string, unknown>)?.clean_url
+    ? String((previewFile as Record<string, unknown>).clean_url).trim()
+    : "";
+  const runsPreviewBaseSrc = clsFilter.hiddenSet.size > 0
+    ? (runsPreviewCleanSrc || runsPreviewThumbSrc)
+    : (runsPreviewAnnotatedSrc || runsPreviewThumbSrc);
   const runsPreviewShowLiveOverlay =
     !isDjiThermalScanUpload &&
     previewRun?.type !== "video" &&
     runsPreviewHasSourceDims &&
-    Boolean(runsPreviewThumbSrc);
+    Boolean(runsPreviewBaseSrc);
 
-  const runsOverlayDetections = clsFilter.filteredRows.filter(
-    (d) => Array.isArray(d.bbox) && d.bbox.length >= 4
-  ) as Array<{ bbox: number[]; class_name?: string; label?: string }>;
+  const runsOverlayDetections = filterRowsForRgbPreviewOverlay(
+    previewDetectionRows as DetectionRowLike[],
+    clsFilter.hiddenSet
+  ).filter((d) => Array.isArray(d.bbox) && d.bbox.length >= 4) as Array<{
+    bbox: number[];
+    class_name?: string;
+    label?: string;
+  }>;
 
   useRgbPreviewDetectionOverlay(runsPreviewImgRef, runsPreviewCanvasRef, {
     enabled: runsPreviewShowLiveOverlay,
     sourceW: runsPreviewSourceW,
     sourceH: runsPreviewSourceH,
     detections: runsOverlayDetections,
-    imageUrlKey: `${previewRun?.run_id}:${previewFileIdx}:${runsPreviewThumbSrc}`,
+    imageUrlKey: `${previewRun?.run_id}:${previewFileIdx}:${runsPreviewBaseSrc}`,
     modalZoom: previewModalZoom,
   });
   const thermalResultRow: Record<string, unknown> | null = (() => {
@@ -2094,7 +2140,7 @@ ${pdfPageChunks.join("\n")}
                   >
                     {previewFile ? (
                       <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center">
-                        {previewRun.type !== "video" && previewFile.annotated_url && (
+                        {previewRun.type !== "video" && (previewFile.annotated_url || runsPreviewThumbSrc) && (
                           <div
                             className="absolute top-3 left-3 z-10 flex items-center gap-0.5 rounded-xl border border-[var(--dash-panel-border)] overflow-hidden shadow-lg"
                             style={{ backgroundColor: "var(--dash-elevated-bg)" }}
@@ -2153,32 +2199,34 @@ ${pdfPageChunks.join("\n")}
                             className="max-h-[min(80vh,calc(100vh-8rem))] w-full max-w-full rounded-2xl bg-black shadow-2xl"
                           />
                         ) : (previewFile.annotated_url || runsPreviewThumbSrc) ? (
-                          <div
-                            className="relative mx-auto inline-block max-w-full rounded-2xl shadow-2xl transition-[transform] duration-150 ease-out"
-                            style={{ transform: `scale(${previewModalZoom})`, transformOrigin: "center" }}
-                          >
-                            {runsPreviewShowLiveOverlay ? (
-                              <>
+                          <div {...rgbPreviewPan}>
+                            <div
+                              className="relative mx-auto inline-block max-w-full rounded-2xl shadow-2xl transition-[transform] duration-150 ease-out"
+                              style={{ transform: `scale(${previewModalZoom})`, transformOrigin: "center" }}
+                            >
+                              {runsPreviewShowLiveOverlay ? (
+                                <>
+                                  <img
+                                    ref={runsPreviewImgRef}
+                                    src={runsPreviewBaseSrc}
+                                    alt={previewFile.filename}
+                                    className="w-full max-h-[80vh] rounded-2xl object-contain bg-black block"
+                                    draggable={false}
+                                  />
+                                  <canvas
+                                    ref={runsPreviewCanvasRef}
+                                    className="pointer-events-none absolute inset-0 h-full w-full rounded-2xl"
+                                    aria-hidden
+                                  />
+                                </>
+                              ) : (
                                 <img
-                                  ref={runsPreviewImgRef}
-                                  src={runsPreviewThumbSrc}
+                                  src={runsPreviewAnnotatedSrc || runsPreviewThumbSrc}
                                   alt={previewFile.filename}
-                                  className="w-full max-h-[80vh] rounded-2xl object-contain bg-black block"
-                                  draggable={false}
+                                  className="w-full max-h-[80vh] rounded-2xl object-contain bg-black"
                                 />
-                                <canvas
-                                  ref={runsPreviewCanvasRef}
-                                  className="pointer-events-none absolute inset-0 h-full w-full rounded-2xl"
-                                  aria-hidden
-                                />
-                              </>
-                            ) : (
-                              <img
-                                src={previewFile.annotated_url}
-                                alt={previewFile.filename}
-                                className="w-full max-h-[80vh] rounded-2xl object-contain bg-black"
-                              />
-                            )}
+                              )}
+                            </div>
                           </div>
                         ) : (
                           <div
@@ -2251,17 +2299,17 @@ ${pdfPageChunks.join("\n")}
               </div>
 
               <div className="shrink-0 p-4 border-b border-dash">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="flex flex-col gap-0.5">
-                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide">Files</div>
+                <div className="grid grid-cols-2 gap-2 text-center">
+                  <div className="dash-nested rounded-lg p-3 min-w-0">
+                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide mb-1">Total files</div>
                     <div className="text-xl font-bold dash-text-primary tabular-nums">{previewRun.total_files}</div>
                   </div>
-                  <div className="flex flex-col gap-0.5">
-                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide">Done</div>
+                  <div className="dash-nested rounded-lg p-3 min-w-0">
+                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide mb-1">Completed</div>
                     <div className="text-xl font-bold dash-text-primary tabular-nums">{previewRun.completed}</div>
                   </div>
-                  <div className="flex flex-col gap-0.5">
-                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide">Defects</div>
+                  <div className="col-span-2 dash-nested rounded-lg p-3 min-w-0">
+                    <div className="text-xs dash-text-muted font-medium uppercase tracking-wide mb-1">Detections</div>
                     {previewFile != null && previewRun ? (
                       previewRun.type === "video" &&
                       previewDetectionRows.length === 0 &&
@@ -2269,13 +2317,13 @@ ${pdfPageChunks.join("\n")}
                       videoDetectionsLoading ? (
                         <div className="text-sm font-bold dash-text-subtle mt-0.5">…</div>
                       ) : previewSidebarPartition ? (
-                        <div className="flex flex-col gap-0.5 mt-0.5">
-                          <span className="text-[11px] font-semibold dash-text-body tabular-nums">
-                            {previewSidebarPartition.components.length} comp.
-                          </span>
-                          <span className={`text-[11px] font-bold tabular-nums ${previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-green-400"}`}>
-                            {previewSidebarPartition.defects.length} def.
-                          </span>
+                        <div
+                          className={`mt-0.5 flex flex-wrap items-center justify-center gap-x-4 text-sm font-semibold leading-snug ${
+                            previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-emerald-400"
+                          }`}
+                        >
+                          <span>{previewSidebarPartition.components.length} components</span>
+                          <span>{previewSidebarPartition.defects.length} defects</span>
                         </div>
                       ) : (
                         <div className={`text-xl font-bold tabular-nums ${previewRun.total_defects > 0 ? "text-red-400" : "text-green-400"}`}>

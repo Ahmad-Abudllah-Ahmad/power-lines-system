@@ -20,10 +20,16 @@ from typing import Optional
 
 try:
     from PIL import Image
-    from PIL.ExifTags import TAGS, GPSTAGS
+    from PIL.ExifTags import TAGS
     _PIL_OK = True
 except ImportError:
     _PIL_OK = False
+
+try:
+    from image_gps import exif_gps_from_image as _exif_gps_from_image
+    _IMAGE_GPS_OK = True
+except ImportError:
+    _IMAGE_GPS_OK = False
 
 try:
     import requests as _requests
@@ -95,17 +101,6 @@ _GEO_ZONES = [
     (55, 65,  5, 20, 60, 18),
     (65, 90, -8, 22, 65, 18),
 ]
-
-
-def _gps_decimal(coord, ref: str) -> Optional[float]:
-    try:
-        d, m, s = [float(x) for x in coord]
-        val = d + m / 60 + s / 3600
-        if ref.upper() in ("S", "W"):
-            val = -val
-        return val
-    except Exception:
-        return None
 
 
 def _extract_xmp_dict(image_bytes: bytes) -> dict:
@@ -186,16 +181,19 @@ def extract_rjpeg_metadata(image_bytes: bytes) -> dict:
         fn = decoded.get("FNumber")
         meta["f_number"] = float(fn) if fn is not None else None
 
-        gps_raw = decoded.get("GPSInfo")
-        if gps_raw:
-            gps = {GPSTAGS.get(k, k): v for k, v in gps_raw.items()}
-            lat = _gps_decimal(gps.get("GPSLatitude", ()), gps.get("GPSLatitudeRef", "N"))
-            lon = _gps_decimal(gps.get("GPSLongitude", ()), gps.get("GPSLongitudeRef", "E"))
-            alt_raw = gps.get("GPSAltitude")
-            alt = float(alt_raw) if alt_raw is not None else None
-            meta["gps_coordinates"] = {"latitude": lat, "longitude": lon}
-            meta["altitude"] = alt
-            meta["altitude_source"] = "EXIF GPSAltitude (absolute, above mean sea level)"
+        gps_d = _exif_gps_from_image(img) if _IMAGE_GPS_OK else None
+        if gps_d:
+            meta["gps_coordinates"] = {
+                "latitude": gps_d.get("latitude"),
+                "longitude": gps_d.get("longitude"),
+            }
+            alt = gps_d.get("altitude")
+            meta["altitude"] = float(alt) if alt is not None else None
+            meta["altitude_source"] = (
+                "EXIF GPSAltitude (absolute, above mean sea level)"
+                if meta["altitude"] is not None
+                else None
+            )
         else:
             meta["gps_coordinates"] = {"latitude": None, "longitude": None}
             meta["altitude"] = None

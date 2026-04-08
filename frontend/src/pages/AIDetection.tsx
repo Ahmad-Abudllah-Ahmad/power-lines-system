@@ -6,6 +6,8 @@ import MediaUploadBox from "../components/MediaUploadBox";
 import UploadPipelineStrip from "../components/UploadPipelineStrip";
 import { toast } from "../components/Toast";
 import {
+  applyBreakageAngleBraceRename,
+  filterRowsForRgbPreviewOverlay,
   partitionDetectionsSidebarBuckets,
   formatDetectionSidebarLabel,
 } from "../utils/detectionSidebarBuckets";
@@ -38,6 +40,7 @@ import {
   Layers,
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
+import { useRgbPreviewPan } from "../utils/useRgbPreviewPan";
 
 const POLL_MS = 2000;
 
@@ -74,6 +77,7 @@ type CardData = {
   progressLabel: string;
   thumbUrl?: string;
   annotatedUrl?: string;
+  cleanUrl?: string;
   imageWidth?: number;
   imageHeight?: number;
   detections: Detection[];
@@ -102,6 +106,7 @@ export default function AIDetection() {
   const [modalZoom, setModalZoom] = useState(1);
   const previewImgRef = useRef<HTMLImageElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rgbPreviewPan = useRgbPreviewPan(modalZoom, previewId);
   const DEFAULT_MODELS: ModelInfo[] = [
     {
       id: "tl_defect_industrial",
@@ -294,6 +299,7 @@ export default function AIDetection() {
             progressLabel: "Complete",
             thumbUrl: r.thumb_url,
             annotatedUrl: r.annotated_url,
+            cleanUrl: r.clean_url,
             imageWidth: typeof r.image_width === "number" ? r.image_width : undefined,
             imageHeight: typeof r.image_height === "number" ? r.image_height : undefined,
             detections: r.detections || [],
@@ -378,6 +384,7 @@ export default function AIDetection() {
             progressLabel: "Complete",
             thumbUrl: d.thumb_url,
             annotatedUrl: d.annotated_url,
+            cleanUrl: d.clean_url,
             imageWidth: typeof d.image_width === "number" ? d.image_width : undefined,
             imageHeight: typeof d.image_height === "number" ? d.image_height : undefined,
             detections: d.detections || [],
@@ -549,7 +556,8 @@ export default function AIDetection() {
 
   const previewDetections = useMemo(() => {
     if (!previewCard) return [];
-    return previewCard.detections.filter(d => d.confidence >= previewConfFilter);
+    const filtered = previewCard.detections.filter(d => d.confidence >= previewConfFilter);
+    return applyBreakageAngleBraceRename(filtered);
   }, [previewCard, previewConfFilter]);
 
   const clsFilter = useDetectionClassFilterForRows(previewDetections, previewId);
@@ -561,15 +569,17 @@ export default function AIDetection() {
 
   const previewHasSourceDims =
     (previewCard?.imageWidth ?? 0) > 0 && (previewCard?.imageHeight ?? 0) > 0;
-  const previewBaseSrc = previewHasSourceDims
-    ? previewCard?.thumbUrl || previewCard?.localPreview
-    : previewCard?.annotatedUrl || previewCard?.thumbUrl || previewCard?.localPreview;
+  const previewFallbackSrc = previewCard?.thumbUrl || previewCard?.localPreview || "";
+  const previewCleanSrc = previewCard?.cleanUrl || previewFallbackSrc;
+  const previewBaseSrc = clsFilter.hiddenSet.size > 0
+    ? previewCleanSrc
+    : (previewCard?.annotatedUrl || previewFallbackSrc);
 
   useRgbPreviewDetectionOverlay(previewImgRef, previewCanvasRef, {
-    enabled: Boolean(previewCard && previewHasSourceDims),
+    enabled: Boolean(previewCard && previewHasSourceDims && Boolean(previewBaseSrc)),
     sourceW: previewCard?.imageWidth ?? 0,
     sourceH: previewCard?.imageHeight ?? 0,
-    detections: clsFilter.filteredRows as Detection[],
+    detections: filterRowsForRgbPreviewOverlay(previewDetections, clsFilter.hiddenSet) as Detection[],
     imageUrlKey: previewBaseSrc ?? "",
     modalZoom,
   });
@@ -1029,24 +1039,26 @@ export default function AIDetection() {
               <div className="absolute top-2 right-2 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body" style={{ backgroundColor: "var(--dash-elevated-bg)" }}>
                 {previewIndex + 1} / {completedCards.length}
               </div>
-              <div
-                className="relative inline-block transition-[transform] duration-150 ease-out"
-                style={{ transform: `scale(${modalZoom})`, transformOrigin: "center center" }}
-              >
-                <img
-                  ref={previewImgRef}
-                  src={previewBaseSrc || ""}
-                  alt={previewCard.filename}
-                  className="block max-h-[85vh] w-auto rounded-lg object-contain shadow-2xl"
-                  draggable={false}
-                />
-                {previewHasSourceDims ? (
-                  <canvas
-                    ref={previewCanvasRef}
-                    className="pointer-events-none absolute inset-0 h-full w-full rounded-lg"
-                    aria-hidden
+              <div {...rgbPreviewPan}>
+                <div
+                  className="relative inline-block transition-[transform] duration-150 ease-out"
+                  style={{ transform: `scale(${modalZoom})`, transformOrigin: "center center" }}
+                >
+                  <img
+                    ref={previewImgRef}
+                    src={previewBaseSrc || ""}
+                    alt={previewCard.filename}
+                    className="block max-h-[85vh] w-auto rounded-lg object-contain shadow-2xl"
+                    draggable={false}
                   />
-                ) : null}
+                  {previewHasSourceDims && Boolean(previewBaseSrc) ? (
+                    <canvas
+                      ref={previewCanvasRef}
+                      className="pointer-events-none absolute inset-0 h-full w-full rounded-lg"
+                      aria-hidden
+                    />
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
@@ -1067,7 +1079,7 @@ export default function AIDetection() {
                   toggleKey={clsFilter.toggleKey}
                   showAll={clsFilter.showAll}
                   hideAll={clsFilter.hideAll}
-                  liveOverlayEnabled={previewHasSourceDims}
+                  liveOverlayEnabled={previewHasSourceDims && Boolean(previewBaseSrc)}
                 />
               </div>
               <div className="mt-2 flex items-center gap-2">

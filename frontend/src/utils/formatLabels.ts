@@ -7,6 +7,10 @@ export function formatDetectionLabel(label: string | undefined | null): string {
   
   // Normalize the label
   let formatted = label.trim();
+  const normalized = formatted.toLowerCase().replace(/[-\s]+/g, "_");
+  if (normalized === "conductor" || normalized === "foundation_pedestal") {
+    return "Foundation Padesteal";
+  }
   
   // Replace underscores with spaces and capitalize words
   formatted = formatted.replace(/_/g, " ");

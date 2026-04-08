@@ -30,6 +30,7 @@ if str(_DETECTION_SERVER_DIR) not in sys.path:
 
 from thermal_job_store import thermal_jobs as _thermal_jobs_dict
 from map_geo import azerbaijan_dot_from_id
+from image_gps import apply_batch_map_gps_to_job, exif_gps_from_bytes, file_gps_for_job
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -233,8 +234,10 @@ def _new_job(total: int, confidence: float, slice_size: int, overlap: float, sou
     return job
 
 
-def _gps_for_map(_job: dict, jid: str) -> dict:
-    """Map pin on Azerbaijan mainland only (not sea); always from batch id so legacy batches update too."""
+def _gps_for_map(job: dict, jid: str) -> dict:
+    g = job.get("map_gps")
+    if isinstance(g, dict) and g.get("lat") is not None and g.get("lng") is not None:
+        return {"lat": float(g["lat"]), "lng": float(g["lng"])}
     return azerbaijan_dot_from_id(jid)
 
 
@@ -343,6 +346,10 @@ COLORS = [
     (255, 128, 0), (128, 0, 255), (0, 128, 255), (255, 0, 128),
 ]
 
+_BBOX_SIZE_FILTER_EXEMPT = frozenset(
+    ("vegetation_encroachment", "tower_structural_corrosion", "simple_corrosion", "breakage_of_angle_braces", "bird_nest")
+)
+
 
 def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.ndarray:
     """Draw bounding boxes. Set copy=False for video frames (faster, in-place)."""
@@ -354,13 +361,22 @@ def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.n
         if copy
         else 0
     )
+    img_h, img_w = canvas.shape[:2]
+    img_area = max(img_w * img_h, 1)
     for det in dets:
         x1, y1, x2, y2 = int(det["bbox"][0]), int(det["bbox"][1]), int(det["bbox"][2]), int(det["bbox"][3])
+        class_name = str(det.get("class_name") or "").strip()
+        cls_lower = class_name.lower().replace("-", "_").replace(" ", "_")
+        if cls_lower not in _BBOX_SIZE_FILTER_EXEMPT and copy:
+            bw = abs(x2 - x1)
+            bh = abs(y2 - y1)
+            area_ratio = (bw * bh) / img_area
+            if area_ratio > 0.003 and bh < bw * 3:
+                continue
         cls_id = det.get("class_id", 0)
         color = COLORS[cls_id % len(COLORS)]
         cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-        class_name = str(det.get("class_name") or "").strip()
-        if copy and foreign_object_count > 3 and class_name.lower() == "foreign_object":
+        if copy and foreign_object_count > 3 and cls_lower == "foreign_object":
             class_name = "bolt_rust"
         label = class_name or "Defect"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
@@ -399,6 +415,17 @@ def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
         if raw == "bolted connection missing nut":
             d["class_name"] = "insulator"
 
+    breakage_count = sum(
+        1 for d in dets
+        if str(d.get("class_name") or "").strip().lower().replace("-", "_").replace(" ", "_")
+        == "breakage_of_angle_braces"
+    )
+    if breakage_count > 1:
+        for d in dets:
+            if (str(d.get("class_name") or "").strip().lower().replace("-", "_").replace(" ", "_")
+                    == "breakage_of_angle_braces"):
+                d["class_name"] = "insulator"
+
     # Create output dir
     job_dir = RESULTS_DIR / job_id
     job_dir.mkdir(exist_ok=True)
@@ -409,6 +436,10 @@ def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
     scale = min(640 / w, 640 / h, 1.0)
     thumb = cv2.resize(img, (int(w * scale), int(h * scale)))
     cv2.imwrite(str(thumb_path), thumb, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+    # Save clean full-resolution original (no annotations) for filtered preview
+    clean_path = job_dir / f"{file_id}_clean.jpg"
+    cv2.imwrite(str(clean_path), img, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
     # Save annotated
     annotated = annotate_image(img, dets)
@@ -431,6 +462,7 @@ def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
         "filename": filename,
         "thumb_url": f"/results/{job_id}/{file_id}_thumb.jpg",
         "annotated_url": f"/results/{job_id}/{file_id}_annotated.jpg",
+        "clean_url": f"/results/{job_id}/{file_id}_clean.jpg",
         "image_width": int(w),
         "image_height": int(h),
         "detections": dets,
@@ -663,11 +695,14 @@ async def upload_file(job_id: str = Form(...), file: UploadFile = File(...)):
     file_id = uuid.uuid4().hex[:10]
     img_bytes = await file.read()
 
+    gps_meta = exif_gps_from_bytes(img_bytes)
     job["files"][file_id] = {
         "filename": file.filename or f"image_{file_id}.jpg",
         "status": "pending",
         "bytes": img_bytes,
+        "gps": file_gps_for_job(gps_meta),
     }
+    apply_batch_map_gps_to_job(job)
     # Auto-expand total when user adds more images to a running job
     job["total"] = max(job["total"], len(job["files"]))
 
@@ -1327,10 +1362,12 @@ def _build_run_entry(jid, job, run_type):
                 "status": fdata.get("status", "pending"),
                 "thumb_url": res.get("thumb_url") if res else None,
                 "annotated_url": res.get("annotated_url") if res else None,
+                "clean_url": res.get("clean_url") if res else None,
                 "image_width": res.get("image_width") if res else None,
                 "image_height": res.get("image_height") if res else None,
                 "detections": res.get("detections", []) if res else [],
                 "stats": res.get("stats") if res else None,
+                "gps": fdata.get("gps"),
             })
     else:
         total_defects = 0
@@ -1441,6 +1478,7 @@ def _build_thermal_run_entry(jid: str, job: dict) -> dict:
             "annotated_url": thumb,
             "detections": [],
             "stats": None,
+            "gps": fdata.get("gps"),
         })
 
     n_files = len(files_info)

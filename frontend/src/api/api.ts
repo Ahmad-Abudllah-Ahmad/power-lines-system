@@ -396,12 +396,22 @@ export type Run = {
   created_at?: string; // Backend may send only timestamp
   completed_at?: string;
   findings_count?: number;
+  /** Detection / thermal list payload (same keys backend uses alongside findings_count). */
+  total_defects?: number;
+  completed?: number;
+  total_files?: number;
   must_review_count?: number;
   ai_confidence?: number;
   avg_confidence?: number; // Alias for AI confidence
   error?: string;
   timestamp?: string; // Legacy list/detail; use created_at ?? timestamp for display
   gps?: { lat: number; lng: number }; // Optional; used by CorridorMap when present
+  /** Per-file EXIF GPS from detection / thermal batch uploads (map + detail). */
+  files?: Array<{
+    file_id?: string;
+    filename?: string;
+    gps?: { lat: number; lng: number } | null;
+  }>;
   metadata?: {
     voltage_kv?: string;
     tower_type?: string;

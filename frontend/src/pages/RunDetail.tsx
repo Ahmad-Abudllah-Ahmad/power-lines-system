@@ -856,7 +856,7 @@ export default function RunDetail() {
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-semibold dash-text-primary">
-                    {detection.component_type} - {detection.defect_type || "Detection"}
+                    {formatDetectionLabel(detection.component_type)} - {formatDetectionLabel(detection.defect_type || "Detection")}
                   </span>
                   <span className={`px-2 py-1 rounded text-xs font-semibold border ${getSeverityColor(displaySeverity(detection))}`}>
                     {displaySeverity(detection)}

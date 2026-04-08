@@ -11,7 +11,25 @@ export const SIDEBAR_COMPONENT_CLASS_KEYS = [
   "transmission_corridor",
   "angle_brace",
   "cross_arm",
+  "two_glass",
 ] as const;
+
+/** Bbox size filter skips these normalized keys (large / horizontal boxes still drawn). */
+export const BBOX_SIZE_FILTER_EXEMPT_KEYS = new Set<string>([
+  "vegetation_encroachment",
+  "tower_structural_corrosion",
+  "simple_corrosion",
+  "foundation_erosion_washout",
+  "breakage_of_angle_braces",
+  "bird_nest",
+]);
+
+/** Omit from sidebar component/defect lists (detections still exist elsewhere). */
+export const SIDEBAR_HIDDEN_CLASS_KEYS = new Set<string>([
+  "simple_corrosion",
+  "pollution_flashover",
+  "foundation_concrete_crack",
+]);
 
 export function normalizeDetectionClassKey(raw: unknown): string {
   return String(raw ?? "")
@@ -22,7 +40,28 @@ export function normalizeDetectionClassKey(raw: unknown): string {
 }
 
 export function formatDetectionSidebarLabel(key: string): string {
+  if (key === "conductor" || key === "foundation_pedestal") return "Foundation Padesteal";
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Normalized keys that share one sidebar label — hide/show toggles must apply to all of them. */
+export function detectionClassKeysForSharedFilterToggle(key: string): string[] {
+  if (key === "conductor" || key === "foundation_pedestal") {
+    return ["conductor", "foundation_pedestal"];
+  }
+  return [key];
+}
+
+/** RGB preview canvas: respect "Show on image" toggles; user-hidden classes are always hidden. */
+export function filterRowsForRgbPreviewOverlay<T extends { class_name?: string; label?: string }>(
+  rows: T[],
+  hiddenKeys: Set<string>
+): T[] {
+  return rows.filter((d) => {
+    const key = normalizeDetectionClassKey(d.class_name ?? d.label);
+    if (hiddenKeys.has(key)) return false;
+    return true;
+  });
 }
 
 export function partitionDetectionsSidebarBuckets(rows: unknown[]): {
@@ -36,6 +75,7 @@ export function partitionDetectionsSidebarBuckets(rows: unknown[]): {
     const rec = d as { class_name?: string; label?: string };
     const key = normalizeDetectionClassKey(rec.class_name ?? rec.label);
     if (!key) continue;
+    if (SIDEBAR_HIDDEN_CLASS_KEYS.has(key)) continue;
     if (allowed.has(key)) comp.set(key, (comp.get(key) || 0) + 1);
     else def.set(key, (def.get(key) || 0) + 1);
   }
@@ -56,6 +96,21 @@ export function uniqueDefectTypeCount(rows: unknown[] | undefined | null): numbe
 }
 
 export type DetectionSidebarPartition = ReturnType<typeof partitionDetectionsSidebarBuckets>;
+
+/** If breakage_of_angle_braces appears more than once, rename them all to insulator. */
+export function applyBreakageAngleBraceRename<T extends { class_name?: string; label?: string }>(
+  rows: T[]
+): T[] {
+  const count = rows.filter(
+    (d) => normalizeDetectionClassKey(d.class_name ?? d.label) === "breakage_of_angle_braces"
+  ).length;
+  if (count <= 1) return rows;
+  return rows.map((d) =>
+    normalizeDetectionClassKey(d.class_name ?? d.label) === "breakage_of_angle_braces"
+      ? { ...d, class_name: "insulator" }
+      : d
+  );
+}
 
 /** Embedded file detections, or fetched video list when embedded is empty. */
 export function previewDetectionRowsForFile(

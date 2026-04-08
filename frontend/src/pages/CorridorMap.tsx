@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { getRuns, getRun, listOverlays, resolveArtifactUrl, API_BASE, type Run } from "../api/api";
-import { azerbaijanDotFromBatchId, isGpsOnAzerbaijanMainland } from "../geo/azerbaijanMainland";
+import { azerbaijanDotFromBatchId } from "../geo/azerbaijanMainland";
 import { toast } from "../components/Toast";
 import {
   Map,
@@ -36,7 +36,12 @@ function isValidGps(lat: number, lng: number): boolean {
 function getRunGpsFromApi(run: Run): { lat: number; lng: number } | null {
   const g = run.gps ?? (run.metadata as { gps?: { lat: number; lng: number } } | undefined)?.gps;
   if (!g || !isValidGps(g.lat, g.lng)) return null;
-  if (!isGpsOnAzerbaijanMainland(g.lat, g.lng)) return null;
+  return { lat: g.lat, lng: g.lng };
+}
+
+function getFileGps(f: { gps?: { lat: number; lng: number } | null }): { lat: number; lng: number } | null {
+  const g = f.gps;
+  if (!g || !isValidGps(g.lat, g.lng)) return null;
   return { lat: g.lat, lng: g.lng };
 }
 
@@ -388,6 +393,15 @@ function FlyTo({ lat, lng }: { lat: number; lng: number }) {
 
 type RunWithGps = Run & { _gps: { lat: number; lng: number }; _runId: string };
 
+function effectiveMarkerGps(
+  run: RunWithGps,
+  selected: RunWithGps | null,
+  pinOverride: { lat: number; lng: number } | null
+): { lat: number; lng: number } {
+  if (selected && selected.id === run.id && pinOverride) return pinOverride;
+  return run._gps;
+}
+
 function scanUploadsBatchUrl(runId: string) {
   return `/runs?batch=${encodeURIComponent(runId)}&highlight=1`;
 }
@@ -403,6 +417,7 @@ export default function CorridorMap() {
   const [dateRange, setDateRange] = useState<"7" | "14" | "30" | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRun, setSelectedRun] = useState<RunWithGps | null>(null);
+  const [mapPinOverride, setMapPinOverride] = useState<{ lat: number; lng: number } | null>(null);
   const [azPinById, setAzPinById] = useState<Record<string, { lat: number; lng: number }>>({});
   const azPinByIdRef = useRef(azPinById);
   azPinByIdRef.current = azPinById;
@@ -500,6 +515,7 @@ export default function CorridorMap() {
 
   const handleSelectRun = useCallback((run: RunWithGps) => {
     setSelectedRun(run);
+    setMapPinOverride(null);
   }, []);
 
   const openBatchInScanUploads = useCallback(
@@ -540,12 +556,18 @@ export default function CorridorMap() {
           />
           {runsWithGps.length > 0 && <FitBounds runs={runsWithGps} deps={[runsWithGps]} />}
           {selectedRun && (
-            <FlyTo lat={selectedRun._gps.lat} lng={selectedRun._gps.lng} />
+            <FlyTo
+              lat={effectiveMarkerGps(selectedRun, selectedRun, mapPinOverride).lat}
+              lng={effectiveMarkerGps(selectedRun, selectedRun, mapPinOverride).lng}
+            />
           )}
           {filtered.map((run) => (
             <Marker
               key={run.id}
-              position={[run._gps.lat, run._gps.lng]}
+              position={[
+                effectiveMarkerGps(run, selectedRun, mapPinOverride).lat,
+                effectiveMarkerGps(run, selectedRun, mapPinOverride).lng,
+              ]}
               icon={createRunIcon(markerColor(run))}
               eventHandlers={{
                 click: () => {
@@ -568,7 +590,11 @@ export default function CorridorMap() {
                     Batch {run._runId}
                   </div>
                   <div className="text-xs dash-text-subtle mt-1">
-                    {run.status} &bull; {(run.created_at ?? run.timestamp) ? new Date(run.created_at ?? run.timestamp).toLocaleDateString() : "—"}
+                    {run.status} &bull;{" "}
+                    {(() => {
+                      const raw = run.created_at ?? run.timestamp;
+                      return raw ? new Date(raw).toLocaleDateString() : "—";
+                    })()}
                   </div>
                   <div className="text-xs dash-text-subtle mt-1">
                     Findings: {run.total_defects ?? run.findings_count ?? 0} &bull; Files: {run.completed ?? 0}/{run.total_files ?? 0}
@@ -731,7 +757,10 @@ export default function CorridorMap() {
                         <span className="text-xs font-medium text-cyan-300 uppercase">Selected</span>
                         <button
                           type="button"
-                          onClick={() => setSelectedRun(null)}
+                          onClick={() => {
+                            setSelectedRun(null);
+                            setMapPinOverride(null);
+                          }}
                           className="p-1 rounded dash-text-muted hover:dash-text-primary"
                           aria-label="Clear selection"
                         >
@@ -751,6 +780,46 @@ export default function CorridorMap() {
                         Open in Scan Uploads
                         <ExternalLink size={14} />
                       </Link>
+                      {(() => {
+                        const files = selectedRun.files ?? [];
+                        const withGps = files
+                          .map((f, i) => ({ f, i, g: getFileGps(f) }))
+                          .filter((x): x is typeof x & { g: { lat: number; lng: number } } => x.g != null);
+                        if (withGps.length === 0) return null;
+                        return (
+                          <div className="mt-3 space-y-1.5 border-t border-cyan-500/30 pt-3">
+                            <div className="text-[10px] font-medium uppercase tracking-wide text-cyan-200/90">
+                              Image GPS (exact)
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setMapPinOverride(null)}
+                              className={`w-full rounded-lg border px-2 py-1.5 text-left text-xs font-medium transition-colors ${
+                                mapPinOverride == null
+                                  ? "border-cyan-500/60 bg-cyan-500/20 text-cyan-200"
+                                  : "border-[var(--dash-panel-border)] bg-[var(--dash-inset-bg)] dash-text-body hover:bg-[var(--dash-hover-bg)]"
+                              }`}
+                            >
+                              Batch pin (mean or first image)
+                            </button>
+                            {withGps.map(({ f, i, g }) => (
+                              <button
+                                key={f.file_id ?? `${i}-${f.filename ?? ""}`}
+                                type="button"
+                                onClick={() => setMapPinOverride(g)}
+                                className={`w-full rounded-lg border px-2 py-1.5 text-left text-xs font-medium transition-colors truncate ${
+                                  mapPinOverride?.lat === g.lat && mapPinOverride?.lng === g.lng
+                                    ? "border-cyan-500/60 bg-cyan-500/20 text-cyan-200"
+                                    : "border-[var(--dash-panel-border)] bg-[var(--dash-inset-bg)] dash-text-body hover:bg-[var(--dash-hover-bg)]"
+                                }`}
+                                title={f.filename ?? `Image ${i + 1}`}
+                              >
+                                {f.filename ? (f.filename.length > 32 ? `${f.filename.slice(0, 30)}…` : f.filename) : `Image ${i + 1}`}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </motion.div>
                   )}
 

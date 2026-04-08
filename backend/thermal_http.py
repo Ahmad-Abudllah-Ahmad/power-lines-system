@@ -16,6 +16,7 @@ from PIL import Image
 
 import thermal_analyzer as ta
 import thermal_processor as tp
+from image_gps import apply_batch_map_gps_to_job, exif_gps_from_bytes, file_gps_for_job
 from thermal_job_store import thermal_jobs, new_thermal_job
 from thermal_image_worker import thermal_image_worker
 
@@ -197,6 +198,7 @@ async def upload_thermal_file(job_id: str, file: UploadFile, client_key: str = "
     img_bytes = await file.read()
     sha256 = hashlib.sha256(img_bytes).hexdigest() if img_bytes else ""
     ck = (client_key or "").strip()[:128] or None
+    gps_meta = exif_gps_from_bytes(img_bytes)
 
     job["files"][file_id] = {
         "filename": fname,
@@ -204,7 +206,9 @@ async def upload_thermal_file(job_id: str, file: UploadFile, client_key: str = "
         "bytes": img_bytes,
         "client_key": ck,
         "sha256": sha256,
+        "gps": file_gps_for_job(gps_meta),
     }
+    apply_batch_map_gps_to_job(job)
     job["total"] = max(job["total"], len(job["files"]))
 
     if job["status"] == "complete":
