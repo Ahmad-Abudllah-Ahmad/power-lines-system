@@ -840,12 +840,15 @@ export default function AIDetection() {
                         {card.status === "processing" ? "Processing analysis" : card.progressLabel}
                       </span>
                       {card.status === "processing" && (
-                        <div className="w-3/4 rounded-full h-1 overflow-hidden" style={{ backgroundColor: "var(--dash-inset-border)" }}>
-                          {card.progress > 0 ? (
-                            <div className="bg-cyan-500 h-full rounded-full transition-all duration-300" style={{ width: `${card.progress}%` }} />
-                          ) : (
-                            <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-gradient-to-r from-transparent via-cyan-500/70 to-transparent" />
-                          )}
+                        <div className="w-4/5 flex flex-col items-center gap-1">
+                          <div className="w-full rounded-full h-2 overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.15)" }}>
+                            {card.progress > 0 ? (
+                              <div className="h-full rounded-full transition-all duration-300 bg-gradient-to-r from-cyan-500 to-blue-500" style={{ width: `${card.progress}%` }} />
+                            ) : (
+                              <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-gradient-to-r from-transparent via-cyan-500/70 to-transparent" />
+                            )}
+                          </div>
+                          <span className="text-[10px] font-semibold text-cyan-300 tabular-nums">{Math.round(card.progress)}%</span>
                         </div>
                       )}
                     </div>

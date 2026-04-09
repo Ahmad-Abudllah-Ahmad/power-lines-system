@@ -253,11 +253,8 @@ def run_sahi_detection(
     file_id: str = "",
     loop: Optional[asyncio.AbstractEventLoop] = None,
 ):
-    """Run YOLO + SAHI on a single image. Returns list[Detection]."""
-    from sahi.predict import get_sliced_prediction
-
+    """Run YOLO full-image + GPU-batched sliced inference on a single image."""
     model = get_model()
-    detection_model = get_sahi_model(confidence)
 
     def _emit_progress(current: int, total_steps: int, pct: int):
         if loop and job_id:
@@ -288,28 +285,41 @@ def run_sahi_detection(
             })
     _emit_progress(1, 2, 40)
 
-    # SAHI sliced prediction (also on GPU)
-    sahi_result = get_sliced_prediction(
-        img,
-        detection_model,
-        slice_height=slice_size,
-        slice_width=slice_size,
-        overlap_height_ratio=overlap,
-        overlap_width_ratio=overlap,
-        verbose=0,
-    )
-    _emit_progress(2, 2, 85)
+    # GPU-batched sliced prediction (all slices sent to GPU in batches instead of one-by-one)
+    img_h, img_w = img.shape[:2]
+    step_h = max(1, int(slice_size * (1 - overlap)))
+    step_w = max(1, int(slice_size * (1 - overlap)))
 
-    sahi_dets = []
-    for pred in sahi_result.object_prediction_list:
-        bbox = pred.bbox.to_xyxy()
-        sahi_dets.append({
-            "bbox": [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
-            "confidence": float(pred.score.value),
-            "class_id": int(pred.category.id),
-            "class_name": pred.category.name,
-            "source": "sahi",
-        })
+    slices: list[np.ndarray] = []
+    offsets: list[tuple[int, int]] = []
+    for y in range(0, img_h, step_h):
+        for x in range(0, img_w, step_w):
+            y2 = min(y + slice_size, img_h)
+            x2 = min(x + slice_size, img_w)
+            slices.append(img[y:y2, x:x2])
+            offsets.append((x, y))
+
+    sahi_dets: list[dict] = []
+    for b_start in range(0, len(slices), GPU_BATCH):
+        b_slices = slices[b_start : b_start + GPU_BATCH]
+        b_offsets = offsets[b_start : b_start + GPU_BATCH]
+        results = model.predict(
+            b_slices, conf=confidence, device=DEVICE,
+            imgsz=slice_size, verbose=False, **_yolo_predict_kw(),
+        )
+        for r, (x_off, y_off) in zip(results, b_offsets):
+            for box in r.boxes:
+                cls_id = int(box.cls[0])
+                bx1, by1, bx2, by2 = box.xyxy[0].tolist()
+                sahi_dets.append({
+                    "bbox": [bx1 + x_off, by1 + y_off, bx2 + x_off, by2 + y_off],
+                    "confidence": float(box.conf[0]),
+                    "class_id": cls_id,
+                    "class_name": model.names.get(cls_id, str(cls_id)),
+                    "source": "sahi",
+                })
+
+    _emit_progress(2, 2, 85)
 
     all_dets = full_dets + sahi_dets
     if len(all_dets) > 0:
@@ -813,6 +823,20 @@ def _remap_video_labels(per_frame: list[list[dict]]) -> None:
             if mapped:
                 d["class_name"] = mapped
 
+def _open_video_capture(path: str) -> cv2.VideoCapture:
+    """Open video with hardware-accelerated decode (NVDEC / D3D11VA / DXVA) when available."""
+    _hw_prop = getattr(cv2, "CAP_PROP_HW_ACCELERATION", None)
+    _hw_any = getattr(cv2, "VIDEO_ACCELERATION_ANY", None)
+    if _hw_prop is not None and _hw_any is not None:
+        try:
+            cap = cv2.VideoCapture(path, cv2.CAP_FFMPEG, [int(_hw_prop), int(_hw_any)])
+            if cap.isOpened():
+                return cap
+        except Exception:
+            pass
+    return cv2.VideoCapture(path)
+
+
 def _batch_detect(model, frames: list[np.ndarray], confidence: float) -> list[list[dict]]:
     """Run YOLO on a batch of frames. imgsz=640, single GPU call."""
     results = model.predict(
@@ -846,7 +870,7 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
     - H.264 re-encode via NVENC for browser playback"""
     import torch
 
-    cap = cv2.VideoCapture(tmp_path)
+    cap = _open_video_capture(tmp_path)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {tmp_path}")
 
@@ -900,6 +924,10 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
         writer_t = threading.Thread(target=_writer_fn, daemon=True)
         writer_t.start()
 
+        # Double-buffer: GPU inference on batch N overlaps with CPU annotation of batch N-1
+        _prev_ann_futs = None
+        _prev_wb = None  # (batch, per_frame_dets) awaiting write-back
+
         while True:
             if _is_cancelled():
                 raise RuntimeError("Cancelled by user")
@@ -915,16 +943,55 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
             if not batch:
                 break
 
+            # GPU inference (CPU annotation threads from the previous batch run concurrently)
             per_frame_dets = _batch_detect(model, batch, confidence)
             _remap_video_labels(per_frame_dets)
 
-            def _ann(pair):
-                frm, dets = pair
-                annotate_image(frm, dets, copy=False)
-                return frm
-            list(_annotate_pool.map(_ann, zip(batch, per_frame_dets)))
+            # Flush previous batch: wait for its annotation, write frames, update counters
+            if _prev_ann_futs is not None:
+                for _fut in _prev_ann_futs:
+                    _fut.result()
+                _pb, _pd = _prev_wb
+                for i, (frame, dets) in enumerate(zip(_pb, _pd)):
+                    write_q.put(frame)
+                    all_det_count += len(dets)
+                    for d in dets:
+                        c = d["confidence"]
+                        conf_sum += c
+                        if c > max_conf:
+                            max_conf = c
+                        all_detections_list.append({
+                            "class_name": d["class_name"],
+                            "confidence": c,
+                            "class_id": d.get("class_id", 0),
+                        })
+                    if not thumb_saved and w > 0 and h > 0:
+                        scale = min(480 / w, 480 / h, 1.0)
+                        t = cv2.resize(_pb[0], (max(1, int(w * scale)), max(1, int(h * scale))))
+                        cv2.imwrite(str(out_dir / "thumb.jpg"), t, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        thumb_saved = True
+                frames_done += len(_pb)
+                pct = min(95, int((frames_done / total_frames) * 100))
+                asyncio.run_coroutine_threadsafe(
+                    sio.emit("video_progress", {
+                        "job_id": job_id, "file_id": file_id,
+                        "frames_done": frames_done, "total_frames": total_frames,
+                        "percent": pct,
+                    }),
+                    loop,
+                )
 
-            for i, (frame, dets) in enumerate(zip(batch, per_frame_dets)):
+            # Submit annotation for current batch (non-blocking; runs on CPU while next GPU batch executes)
+            _prev_ann_futs = [_annotate_pool.submit(annotate_image, f, d, False)
+                              for f, d in zip(batch, per_frame_dets)]
+            _prev_wb = (batch, per_frame_dets)
+
+        # Flush the final pending batch
+        if _prev_ann_futs is not None:
+            for _fut in _prev_ann_futs:
+                _fut.result()
+            _pb, _pd = _prev_wb
+            for i, (frame, dets) in enumerate(zip(_pb, _pd)):
                 write_q.put(frame)
                 all_det_count += len(dets)
                 for d in dets:
@@ -939,11 +1006,10 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                     })
                 if not thumb_saved and w > 0 and h > 0:
                     scale = min(480 / w, 480 / h, 1.0)
-                    t = cv2.resize(batch[0], (max(1, int(w * scale)), max(1, int(h * scale))))
+                    t = cv2.resize(_pb[0], (max(1, int(w * scale)), max(1, int(h * scale))))
                     cv2.imwrite(str(out_dir / "thumb.jpg"), t, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     thumb_saved = True
-
-            frames_done += len(batch)
+            frames_done += len(_pb)
             pct = min(95, int((frames_done / total_frames) * 100))
             asyncio.run_coroutine_threadsafe(
                 sio.emit("video_progress", {
@@ -1050,7 +1116,7 @@ def _video_det_backfill_lock(file_id: str) -> threading.Lock:
 def _collect_detections_from_video_file(video_path: str, confidence: float) -> list:
     """Run the same batched YOLO path as whole-video processing; no annotate/write."""
     model = get_model()
-    cap = cv2.VideoCapture(video_path)
+    cap = _open_video_capture(video_path)
     if not cap.isOpened():
         return []
     all_list: list[dict] = []

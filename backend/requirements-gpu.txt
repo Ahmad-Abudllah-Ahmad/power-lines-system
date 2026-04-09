@@ -1,6 +1,6 @@
-# GPU stack — NVIDIA CUDA 12.6 wheels (torch 2.11). For other CUDA versions see https://pytorch.org/get-started/locally/
-# Do not install this in the same venv as requirements-cpu.txt without reinstalling torch/torchvision.
---extra-index-url https://download.pytorch.org/whl/cu126
+# GPU stack — NVIDIA CUDA 12.8 wheels for modern NVIDIA GPUs, including RTX 50-series.
+# Keep PyPI as the main index and add the PyTorch CUDA wheel index as an extra source.
+--extra-index-url https://download.pytorch.org/whl/cu128
 
 dji-thermal-sdk==0.0.2
 fastapi==0.135.3
@@ -15,5 +15,6 @@ sahi==0.11.36
 ultralytics==8.4.36
 uvicorn[standard]==0.44.0
 
-torch==2.11.0+cu126
-torchvision==0.26.0+cu126
+torch
+torchvision
+torchaudio
