@@ -6,11 +6,10 @@ import MediaUploadBox from "../components/MediaUploadBox";
 import UploadPipelineStrip from "../components/UploadPipelineStrip";
 import { toast } from "../components/Toast";
 import {
-  applyBreakageAngleBraceRename,
   filterRowsForRgbPreviewOverlay,
   partitionDetectionsSidebarBuckets,
-  formatDetectionSidebarLabel,
 } from "../utils/detectionSidebarBuckets";
+import { DetectionSidebarBucketPanels } from "../components/DetectionSidebarBucketPanels";
 import {
   DetectionClassFilterDropdown,
   DETECTION_FILE_GRID_CLASS,
@@ -99,7 +98,14 @@ export default function AIDetection() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ completed: 0, total: 0 });
-  const [config, setConfig] = useState({ confidence: 0.20, sliceSize: 768, overlap: 0.1 });
+  const [config, setConfig] = useState({
+    confidence: 0.20,
+    sliceSize: 1280,
+    overlap: 0.25,
+    nmsIou: 0.10,
+    fullImgsz: 1280,
+    sahiTiled: true,
+  });
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewConfFilter, setPreviewConfFilter] = useState(0);
   const [dragActive, setDragActive] = useState(false);
@@ -109,14 +115,14 @@ export default function AIDetection() {
   const rgbPreviewPan = useRgbPreviewPan(modalZoom, previewId);
   const DEFAULT_MODELS: ModelInfo[] = [
     {
-      id: "tl_defect_industrial",
-      title: "TL Defect Industrial",
-      path: "",
-      description: "tl_defect_industrial 55.5h · weights/best.pt",
+      id: "dota_1000ep_best",
+      title: "DOTA 1000ep · YOLO11x OBB (RunPod H200)",
+      path: "/workspace/project/runs/obb/yolo11x_obb_dota_20260426_060214/weights/best.pt",
+      description: "YOLO on RunPod GPU (port 6006) · https://ycfjp6tp0zl9xf-64410b2b-6006.proxy.runpod.net",
     },
   ];
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>(DEFAULT_MODELS);
-  const [selectedModel, setSelectedModel] = useState<string>("tl_defect_industrial");
+  const [selectedModel, setSelectedModel] = useState<string>("dota_1000ep_best");
   const [detectionMode, setDetectionMode] = useState<DetectionMode>(() => {
     try {
       const m = new URLSearchParams(window.location.search).get("mode");
@@ -445,6 +451,9 @@ export default function AIDetection() {
           det_confidence: config.confidence,
           det_slice_size: config.sliceSize,
           det_overlap: config.overlap,
+          det_nms_iou: config.nmsIou,
+          det_full_imgsz: config.fullImgsz,
+          det_sahi_tiled: config.sahiTiled,
           model_id: selectedModel || undefined,
         }),
       });
@@ -556,15 +565,14 @@ export default function AIDetection() {
 
   const previewDetections = useMemo(() => {
     if (!previewCard) return [];
-    const filtered = previewCard.detections.filter(d => d.confidence >= previewConfFilter);
-    return applyBreakageAngleBraceRename(filtered);
+    return previewCard.detections.filter(d => d.confidence >= previewConfFilter);
   }, [previewCard, previewConfFilter]);
 
   const clsFilter = useDetectionClassFilterForRows(previewDetections, previewId);
 
   const previewSidebarBuckets = useMemo(
-    () => partitionDetectionsSidebarBuckets(clsFilter.filteredRows as Detection[]),
-    [clsFilter.filteredRows]
+    () => partitionDetectionsSidebarBuckets(previewDetections as Detection[]),
+    [previewDetections]
   );
 
   const previewHasSourceDims =
@@ -634,7 +642,7 @@ export default function AIDetection() {
             </div>
             <div className="text-2xl font-bold dash-text-primary mb-2">Defect Detection Pipeline</div>
             <div className="text-sm dash-text-body leading-relaxed">
-              Upload RGB Individual or bulk images for AI-powered defect detection. The system uses YOLO + SAHI sliced inference to detect defects and display results in real time.
+              Upload RGB images for defect detection. YOLO + SAHI runs on your RunPod instance (NVIDIA H200, HTTP port 6006); this app batches images and merges results.
             </div>
           </div>
           <div className="flex gap-2">
@@ -987,7 +995,7 @@ export default function AIDetection() {
           <button
             type="button"
             onClick={() => setPreviewId(null)}
-            className="absolute top-4 z-20 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem)]"
+            className="absolute top-4 z-20 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(380px+1rem)]"
             style={{ backgroundColor: "var(--dash-elevated-bg)" }}
             aria-label="Close preview"
           >
@@ -1005,7 +1013,7 @@ export default function AIDetection() {
               </button>
               <button
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem+3.5rem)]"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(380px+1rem+3.5rem)]"
                 style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronRight size={24} />
@@ -1066,102 +1074,92 @@ export default function AIDetection() {
             </div>
           </div>
 
-          {/* Detail Panel */}
-          <div className="w-[320px] border-l border-[var(--dash-panel-border)] overflow-y-auto flex flex-col" onClick={e => e.stopPropagation()} style={{ backgroundColor: "var(--dash-modal-aside)" }}>
-            <div className="p-4 border-b border-[var(--dash-panel-border)]">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1 text-lg font-bold dash-text-primary truncate" title={previewCard.filename}>
-                  {previewCard.filename}
-                </div>
-                <DetectionClassFilterDropdown
-                  filterClassKeys={clsFilter.filterClassKeys}
-                  hiddenSet={clsFilter.hiddenSet}
-                  open={clsFilter.open}
-                  setOpen={clsFilter.setOpen}
-                  anchorRef={clsFilter.anchorRef}
-                  toggleKey={clsFilter.toggleKey}
-                  showAll={clsFilter.showAll}
-                  hideAll={clsFilter.hideAll}
-                  liveOverlayEnabled={previewHasSourceDims && Boolean(previewBaseSrc)}
-                />
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <span className="rounded border border-cyan-500/50 bg-cyan-500/20 px-2 py-0.5 text-xs font-bold text-cyan-300">
-                  RGB
-                </span>
-                {previewCard.stats?.processing_time_ms ? (
-                  <span className="text-xs dash-text-muted">{(previewCard.stats.processing_time_ms / 1000).toFixed(1)}s</span>
-                ) : null}
-              </div>
-            </div>
-
-            {previewCard.stats && (
-              <div className="p-4 border-b border-[var(--dash-panel-border)] grid grid-cols-2 gap-3">
+          {/* Detail panel — same structure as Dashboard Recent Uploads / batch preview */}
+          <div
+            className="flex h-full min-h-0 w-[380px] shrink-0 flex-col overflow-hidden border-l border-dash dash-modal-aside"
+            onClick={e => e.stopPropagation()}
+            style={{ backgroundColor: "var(--dash-modal-aside)" }}
+          >
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="p-4 space-y-5">
                 <div>
-                  <div className="text-xs dash-text-muted">Components</div>
-                  <div className="text-xl font-bold dash-text-primary">{previewSidebarBuckets.components.length}</div>
-                </div>
-                <div>
-                  <div className="text-xs dash-text-muted">Defects</div>
-                  <div className={`text-xl font-bold ${previewSidebarBuckets.defects.length > 0 ? "text-red-400" : "text-green-400"}`}>
-                    {previewSidebarBuckets.defects.length}
+                  <div className="text-[10px] uppercase tracking-widest dash-text-subtle mb-1">Run ID</div>
+                  <div className="font-Poppins text-sm dash-text-primary break-all leading-snug">
+                    {jobId || previewId}
                   </div>
                 </div>
-              </div>
-            )}
 
-            {/* <div className="p-4 border-b border-[var(--dash-panel-border)]">
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-xs font-medium dash-text-muted">Confidence Filter</div>
-                <span className="text-xs font-Poppins text-premium-accent">&ge; {Math.round(previewConfFilter * 100)}%</span>
-              </div>
-              <input
-                type="range" min="0" max="95" step="5"
-                value={Math.round(previewConfFilter * 100)}
-                onChange={e => setPreviewConfFilter(parseInt(e.target.value) / 100)}
-                className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-neutral-700 accent-cyan-500"
-              />
-              <div className="text-xs dash-text-subtle mt-1">
-                Showing {previewDetections.length} of {previewCard.detections.length} detections
-              </div>
-            </div> */}
-
-            <div className="flex-1 overflow-y-auto p-4">
-              {previewDetections.length === 0 ? (
-                <div className="text-center py-8 dash-text-subtle text-sm">
-                  {previewCard.detections.length === 0
-                    ? "No defects detected"
-                    : "No detections above threshold"}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {(
-                    [
-                      { title: "Components", prefix: "c", items: previewSidebarBuckets.components },
-                      { title: "Defects", prefix: "d", items: previewSidebarBuckets.defects },
-                    ] as const
-                  ).map(
-                    ({ title, prefix, items }) =>
-                      items.length > 0 && (
-                        <div key={title}>
-                          <div className="text-xs font-semibold dash-text-body mb-1.5">{title}</div>
-                          <div className="space-y-1">
-                            {items.map(({ key }) => (
-                              <div
-                                key={`${prefix}-${key}`}
-                                className="flex items-center py-1 text-xs rounded-lg border border-[var(--dash-panel-border)] px-3"
-                              >
-                                <span className="min-w-0 truncate dash-text-primary" title={formatDetectionSidebarLabel(key)}>
-                                  {formatDetectionSidebarLabel(key)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
+                <div className="dash-nested rounded-lg p-3 min-w-0 text-center">
+                  <div className="text-xs dash-text-subtle font-medium uppercase tracking-wide mb-1">Detections</div>
+                  {previewSidebarBuckets.components.length > 0 || previewSidebarBuckets.defects.length > 0 ? (
+                    <div
+                      className={`mt-0.5 flex flex-wrap items-center justify-center gap-x-4 text-sm font-semibold leading-snug ${
+                        previewSidebarBuckets.defects.length > 0 ? "text-red-400" : "text-emerald-400"
+                      }`}
+                    >
+                      <span>{previewSidebarBuckets.components.length} components</span>
+                      <span>{previewSidebarBuckets.defects.length} defects</span>
+                    </div>
+                  ) : (
+                    <div
+                      className={`text-xl font-semibold tabular-nums mt-0.5 ${
+                        (previewCard.stats?.total_defects ?? previewCard.detections.length) > 0
+                          ? "text-red-400"
+                          : "text-emerald-400"
+                      }`}
+                    >
+                      {previewCard.stats?.total_defects ?? previewCard.detections.length}
+                    </div>
                   )}
                 </div>
-              )}
+
+                <div className="dash-nested dash-nested-mid rounded-lg border border-dash p-3 space-y-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[10px] uppercase tracking-widest dash-text-subtle">Filename</span>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <span className="rounded border border-cyan-500/50 bg-cyan-500/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-300">
+                          RGB
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs font-medium break-all leading-relaxed dash-text-primary" title={previewCard.filename}>
+                        {previewCard.filename}
+                      </div>
+                    </div>
+                    <DetectionClassFilterDropdown
+                      filterClassKeys={clsFilter.filterClassKeys}
+                      hiddenSet={clsFilter.hiddenSet}
+                      open={clsFilter.open}
+                      setOpen={clsFilter.setOpen}
+                      anchorRef={clsFilter.anchorRef}
+                      toggleKey={clsFilter.toggleKey}
+                      showAll={clsFilter.showAll}
+                      hideAll={clsFilter.hideAll}
+                      liveOverlayEnabled={previewHasSourceDims && Boolean(previewBaseSrc)}
+                    />
+                  </div>
+                  {previewCard.stats?.processing_time_ms != null && (
+                    <div className="pt-0.5 text-[11px] dash-text-muted">
+                      Processing time:{" "}
+                      <span className="font-medium text-[var(--dash-body)]">
+                        {Math.round(previewCard.stats.processing_time_ms)} ms
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {previewDetections.length === 0 ? (
+                  <div className="py-6 text-center text-sm dash-text-subtle">
+                    {previewCard.detections.length === 0
+                      ? "No defects detected"
+                      : "No detections above threshold"}
+                  </div>
+                ) : (
+                  (previewSidebarBuckets.components.length > 0 || previewSidebarBuckets.defects.length > 0) && (
+                    <DetectionSidebarBucketPanels partition={previewSidebarBuckets} hideRowCounts />
+                  )
+                )}
+              </div>
             </div>
           </div>
         </div>

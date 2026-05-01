@@ -36,7 +36,6 @@ import {
   type ThermalAnalysisData,
 } from "../components/ThermalAnalysisDetailModal";
 import {
-  applyBreakageAngleBraceRename,
   filterRowsForRgbPreviewOverlay,
   partitionDetectionsSidebarBuckets,
   previewDetectionRowsForFile,
@@ -376,36 +375,18 @@ function RecentBatchUploadDetailModal({
   const mainImg = annotatedResolved || thumbResolved;
 
   const runKind = isVideoJob ? ("video" as const) : ("image" as const);
-  const previewDetectionRows = applyBreakageAngleBraceRename(
-    previewDetectionRowsForFile(
-      runKind,
-      cur?.detections as unknown[] | undefined,
-      batchDetailVideoDets
-    ) as DetectionRowLike[]
-  );
+  const previewDetectionRows = previewDetectionRowsForFile(
+    runKind,
+    cur?.detections as unknown[] | undefined,
+    batchDetailVideoDets
+  ) as DetectionRowLike[];
 
-  const batchClassKeySourceRows = useMemo(() => {
-    const out: DetectionRowLike[] = [];
-    for (const file of files) {
-      if (!Array.isArray(file.detections)) continue;
-      for (const d of file.detections) out.push(d as DetectionRowLike);
-    }
-    if (isVideoJob && batchDetailVideoDets.length > 0) {
-      for (const d of batchDetailVideoDets) out.push(d as DetectionRowLike);
-    }
-    return out;
-  }, [files, isVideoJob, batchDetailVideoDets]);
-
-  const clsFilter = useDetectionClassFilterForRows(
-    previewDetectionRows,
-    runId,
-    batchClassKeySourceRows.length > 0 ? { classKeysFromRows: batchClassKeySourceRows } : undefined
-  );
+  const clsFilter = useDetectionClassFilterForRows(previewDetectionRows, runId);
 
   const previewSidebarPartition = useMemo(() => {
     if (!previewDetectionRows.length) return null;
-    return partitionDetectionsSidebarBuckets(clsFilter.filteredRows);
-  }, [previewDetectionRows, clsFilter.filteredRows]);
+    return partitionDetectionsSidebarBuckets(previewDetectionRows);
+  }, [previewDetectionRows]);
 
   const overlayDetections = filterRowsForRgbPreviewOverlay(
     previewDetectionRows,
@@ -798,17 +779,7 @@ function RecentBatchUploadDetailModal({
               <div className="text-[11px] dash-text-muted mt-1">{shortAgo(created)}</div>
             </div>
 
-            {/* Stats: top row Total files | Completed; full-width Detections below (reference layout) */}
-            <div className="grid grid-cols-2 gap-2 text-center">
-              <div className="dash-nested rounded-lg p-3 min-w-0">
-                <div className="text-[10px] dash-text-subtle uppercase tracking-wide mb-1">Total files</div>
-                <div className="text-xl font-semibold dash-text-primary tabular-nums">{totalFiles}</div>
-              </div>
-              <div className="dash-nested rounded-lg p-3 min-w-0">
-                <div className="text-[10px] dash-text-subtle uppercase tracking-wide mb-1">Completed</div>
-                <div className="text-xl font-semibold text-emerald-400 tabular-nums">{completed}</div>
-              </div>
-              <div className="col-span-2 dash-nested rounded-lg p-3 min-w-0">
+            <div className="dash-nested rounded-lg p-3 min-w-0 text-center">
                 <div className="text-xs dash-text-subtle font-medium uppercase tracking-wide mb-1">Detections</div>
                 {isVideoJob &&
                 previewDetectionRows.length === 0 &&
@@ -833,7 +804,6 @@ function RecentBatchUploadDetailModal({
                     {defectsFound}
                   </div>
                 )}
-              </div>
             </div>
 
             {/* Current file info */}

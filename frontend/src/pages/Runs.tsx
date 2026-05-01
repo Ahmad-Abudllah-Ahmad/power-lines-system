@@ -37,8 +37,6 @@ import {
 } from "lucide-react";
 import { API_BASE } from "../api/api";
 import {
-  applyBreakageAngleBraceRename,
-  BBOX_SIZE_FILTER_EXEMPT_KEYS,
   filterRowsForRgbPreviewOverlay,
   formatDetectionSidebarLabel,
   normalizeDetectionClassKey,
@@ -57,7 +55,6 @@ import {
   useDetectionClassFilterForRows,
   useRgbPreviewDetectionOverlay,
 } from "../components/DetectionClassFilter";
-import { rgbAnnotationTunablesFromDetections } from "../utils/rgbAnnotationLensAdjust";
 import { useRgbPreviewPan } from "../utils/useRgbPreviewPan";
 
 function resolveThermalFetchUrl(u: string): string {
@@ -708,6 +705,24 @@ export default function Runs() {
     });
   }, []);
 
+  const completedFiles = previewRun?.files.filter((f) => f.status === "done") || [];
+  const previewFile = completedFiles[previewFileIdx] || null;
+
+  const previewDetectionRows = useMemo(() => {
+    if (!previewRun || !previewFile) return [];
+    return previewDetectionRowsForFile(previewRun.type, previewFile.detections, videoFetchedDetections) as Array<{
+      class_name?: string;
+      label?: string;
+    }>;
+  }, [previewRun, previewFile, videoFetchedDetections]);
+
+  const previewClassFilterResetKey =
+    previewRun && previewFile ? `${previewRun.run_id}:${previewFileIdx}` : null;
+  const clsFilter = useDetectionClassFilterForRows(
+    previewDetectionRows as DetectionRowLike[],
+    previewClassFilterResetKey
+  );
+
   const generateSelectedReport = useCallback(async () => {
     const selected = runs.filter((r) => selectedRunIds.has(r.run_id));
     if (selected.length === 0) return;
@@ -782,19 +797,14 @@ export default function Runs() {
       });
       if (!isThermalReportRun) for (const f of imageFiles) {
         const dets = Array.isArray(f.detections) ? f.detections : [];
-        const srcW = typeof f.image_width === "number" ? f.image_width : 0;
-        const srcH = typeof f.image_height === "number" ? f.image_height : 0;
-        const lens = srcW > 0 && srcH > 0 ? rgbAnnotationTunablesFromDetections(dets as Array<{ bbox?: number[] }>, srcW, srcH) : null;
-        const boxes = dets
+        const detsForReport = filterRowsForRgbPreviewOverlay(
+          dets as Array<{ class_name?: string; label?: string }>,
+          clsFilter.hiddenSet
+        );
+        const boxes = detsForReport
           .filter((d: any) => {
             const cls = normalizeDetectionClassKey(String(d?.class_name ?? d?.label ?? ""));
             if (SIDEBAR_HIDDEN_CLASS_KEYS.has(cls)) return false;
-            if (lens && Array.isArray(d?.bbox) && d.bbox.length >= 4 && !BBOX_SIZE_FILTER_EXEMPT_KEYS.has(cls)) {
-              const bw = Math.abs(d.bbox[2] - d.bbox[0]);
-              const bh = Math.abs(d.bbox[3] - d.bbox[1]);
-              const areaRatio = (bw * bh) / (srcW * srcH);
-              if (areaRatio > lens.areaSkipAbove && bh < bw * 3) return false;
-            }
             return true;
           })
           .map((d: any) => ({
@@ -1143,33 +1153,17 @@ ${pdfPageChunks.join("\n")}
     if (pdfExportSuccessCount > 0) {
       toast.success(`${pdfExportSuccessCount} report${pdfExportSuccessCount > 1 ? "s" : ""} downloaded`, 2500);
     }
-  }, [runs, selectedRunIds, runCreatedTs, fileReviewStatusByRun, fileCommentByRun, batchAssigneeByRun]);
+  }, [runs, selectedRunIds, runCreatedTs, fileReviewStatusByRun, fileCommentByRun, batchAssigneeByRun, clsFilter.hiddenSet]);
 
   const openPreview = (run: RunEntry, fileIdx = 0) => {
     setPreviewRun(run);
     setPreviewFileIdx(fileIdx);
   };
 
-  const completedFiles = previewRun?.files.filter(f => f.status === "done") || [];
-  const previewFile = completedFiles[previewFileIdx] || null;
-
-  const previewDetectionRows = useMemo(() => {
-    if (!previewRun || !previewFile) return [];
-    const rows = previewDetectionRowsForFile(previewRun.type, previewFile.detections, videoFetchedDetections);
-    return applyBreakageAngleBraceRename(rows as Array<{ class_name?: string; label?: string }>);
-  }, [previewRun, previewFile, videoFetchedDetections]);
-
-  const previewClassFilterResetKey =
-    previewRun && previewFile ? `${previewRun.run_id}:${previewFileIdx}` : null;
-  const clsFilter = useDetectionClassFilterForRows(
-    previewDetectionRows as DetectionRowLike[],
-    previewClassFilterResetKey
-  );
-
   const previewSidebarPartition = useMemo(() => {
     if (!previewDetectionRows.length) return null;
-    return partitionDetectionsSidebarBuckets(clsFilter.filteredRows);
-  }, [previewDetectionRows.length, clsFilter.filteredRows]);
+    return partitionDetectionsSidebarBuckets(previewDetectionRows);
+  }, [previewDetectionRows]);
 
   const isDjiThermalScanUpload = Boolean(previewRun?.thermal_analysis_job);
 
@@ -2299,16 +2293,7 @@ ${pdfPageChunks.join("\n")}
               </div>
 
               <div className="shrink-0 p-4 border-b border-dash">
-                <div className="grid grid-cols-2 gap-2 text-center">
-                  <div className="dash-nested rounded-lg p-3 min-w-0">
-                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide mb-1">Total files</div>
-                    <div className="text-xl font-bold dash-text-primary tabular-nums">{previewRun.total_files}</div>
-                  </div>
-                  <div className="dash-nested rounded-lg p-3 min-w-0">
-                    <div className="text-[10px] dash-text-muted font-medium uppercase tracking-wide mb-1">Completed</div>
-                    <div className="text-xl font-bold dash-text-primary tabular-nums">{previewRun.completed}</div>
-                  </div>
-                  <div className="col-span-2 dash-nested rounded-lg p-3 min-w-0">
+                <div className="dash-nested rounded-lg p-3 min-w-0 text-center">
                     <div className="text-xs dash-text-muted font-medium uppercase tracking-wide mb-1">Detections</div>
                     {previewFile != null && previewRun ? (
                       previewRun.type === "video" &&
@@ -2335,7 +2320,6 @@ ${pdfPageChunks.join("\n")}
                         {previewRun.total_defects}
                       </div>
                     )}
-                  </div>
                 </div>
               </div>
 
@@ -2405,7 +2389,9 @@ ${pdfPageChunks.join("\n")}
 
                 {previewFile && previewSidebarPartition &&
                   (previewSidebarPartition.components.length > 0 || previewSidebarPartition.defects.length > 0) && (
-                    <DetectionSidebarBucketPanels partition={previewSidebarPartition} hideRowCounts />
+                    <div className="overflow-hidden rounded-lg border border-dash">
+                      <DetectionSidebarBucketPanels partition={previewSidebarPartition} hideRowCounts />
+                    </div>
                   )}
               </div>
             </div>

@@ -14,16 +14,6 @@ export const SIDEBAR_COMPONENT_CLASS_KEYS = [
   "two_glass",
 ] as const;
 
-/** Bbox size filter skips these normalized keys (large / horizontal boxes still drawn). */
-export const BBOX_SIZE_FILTER_EXEMPT_KEYS = new Set<string>([
-  "vegetation_encroachment",
-  "tower_structural_corrosion",
-  "simple_corrosion",
-  "foundation_erosion_washout",
-  "breakage_of_angle_braces",
-  "bird_nest",
-]);
-
 /** Omit from sidebar component/defect lists (detections still exist elsewhere). */
 export const SIDEBAR_HIDDEN_CLASS_KEYS = new Set<string>([
   "simple_corrosion",
@@ -96,21 +86,6 @@ export function uniqueDefectTypeCount(rows: unknown[] | undefined | null): numbe
 }
 
 export type DetectionSidebarPartition = ReturnType<typeof partitionDetectionsSidebarBuckets>;
-
-/** If breakage_of_angle_braces appears more than once, rename them all to insulator. */
-export function applyBreakageAngleBraceRename<T extends { class_name?: string; label?: string }>(
-  rows: T[]
-): T[] {
-  const count = rows.filter(
-    (d) => normalizeDetectionClassKey(d.class_name ?? d.label) === "breakage_of_angle_braces"
-  ).length;
-  if (count <= 1) return rows;
-  return rows.map((d) =>
-    normalizeDetectionClassKey(d.class_name ?? d.label) === "breakage_of_angle_braces"
-      ? { ...d, class_name: "insulator" }
-      : d
-  );
-}
 
 /** Embedded file detections, or fetched video list when embedded is empty. */
 export function previewDetectionRowsForFile(

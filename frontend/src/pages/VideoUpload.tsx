@@ -93,7 +93,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ completed: 0, total: 0 });
-  const [config, setConfig] = useState({ confidence: 0.25, sliceSize: 640, overlap: 0.2, frameInterval: 1 });
+  const [config, setConfig] = useState({ confidence: 0.20, sliceSize: 1280, overlap: 0.25, frameInterval: 1 });
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [jobCreatedAt, setJobCreatedAt] = useState<number | null>(null);
   const [videoFetchedDetections, setVideoFetchedDetections] = useState<any[]>([]);
@@ -101,14 +101,14 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
   const [dragActive, setDragActive] = useState(false);
   const DEFAULT_MODELS: ModelInfo[] = [
     {
-      id: "tl_defect_industrial",
-      title: "TL Defect Industrial",
-      path: "",
-      description: "tl_defect_industrial 55.5h · weights/best.pt",
+      id: "dota_1000ep_best",
+      title: "DOTA 1000ep · YOLO11x OBB (RunPod H200)",
+      path: "/workspace/project/runs/obb/yolo11x_obb_dota_20260426_060214/weights/best.pt",
+      description: "YOLO on RunPod GPU (port 6006) · https://ycfjp6tp0zl9xf-64410b2b-6006.proxy.runpod.net",
     },
   ];
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>(DEFAULT_MODELS);
-  const [selectedModel, setSelectedModel] = useState<string>("tl_defect_industrial");
+  const [selectedModel, setSelectedModel] = useState<string>("dota_1000ep_best");
 
   const socketRef = useRef<Socket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -555,8 +555,8 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
 
   const previewSidebarPartition = useMemo(() => {
     if (!previewDetectionRows.length) return null;
-    return partitionDetectionsSidebarBuckets(clsFilter.filteredRows);
-  }, [previewDetectionRows.length, clsFilter.filteredRows]);
+    return partitionDetectionsSidebarBuckets(previewDetectionRows);
+  }, [previewDetectionRows]);
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -999,16 +999,8 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
               <div className="text-xs dash-text-subtle mt-1">{timeAgoJob(jobCreatedAt)}</div>
             </div>
 
-            <div className="p-4 border-b border-[var(--dash-panel-border)] grid grid-cols-2 gap-2 text-center">
+            <div className="p-4 border-b border-[var(--dash-panel-border)] text-center">
               <div className="rounded-lg border border-[var(--dash-panel-border)] p-3 min-w-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
-                <div className="text-[10px] dash-text-muted uppercase tracking-wide mb-1">Total Files</div>
-                <div className="text-xl font-bold dash-text-primary tabular-nums">{sidebarBatchStats.totalFiles}</div>
-              </div>
-              <div className="rounded-lg border border-[var(--dash-panel-border)] p-3 min-w-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
-                <div className="text-[10px] dash-text-muted uppercase tracking-wide mb-1">Completed</div>
-                <div className="text-xl font-bold dash-text-primary tabular-nums">{sidebarBatchStats.completed}</div>
-              </div>
-              <div className="col-span-2 rounded-lg border border-[var(--dash-panel-border)] p-3 min-w-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
                 <div className="text-xs dash-text-muted font-medium uppercase tracking-wide mb-1">Detections</div>
                 {previewDetectionRows.length === 0 &&
                 (previewCard.totalDetections || 0) > 0 &&
@@ -1073,7 +1065,9 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
               <div className="shrink-0 border-b border-[var(--dash-panel-border)] p-4 text-xs dash-text-subtle">Loading defect list…</div>
             )}
             {previewSidebarPartition && (previewSidebarPartition.components.length > 0 || previewSidebarPartition.defects.length > 0) && (
-              <DetectionSidebarBucketPanels partition={previewSidebarPartition} hideRowCounts />
+              <div className="overflow-hidden rounded-lg border border-dash">
+                <DetectionSidebarBucketPanels partition={previewSidebarPartition} hideRowCounts />
+              </div>
             )}
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Filter, ChevronDown } from "lucide-react";
 import {
-  BBOX_SIZE_FILTER_EXEMPT_KEYS,
   detectionClassKeysForSharedFilterToggle,
   formatDetectionSidebarLabel,
   normalizeDetectionClassKey,
@@ -24,38 +23,39 @@ export type DetectionRowLike = {
   class_id?: number;
 };
 
-/** Same order as `COLORS` in backend `server.py` (OpenCV BGR → canvas uses RGB). */
-const ANNOTATION_COLORS_BGR: readonly [number, number, number][] = [
-  [0, 255, 255],
-  [255, 0, 255],
-  [0, 255, 0],
-  [255, 255, 0],
-  [255, 128, 0],
-  [128, 0, 255],
-  [0, 128, 255],
-  [255, 0, 128],
-];
+/**
+ * Two-tone box scheme that mirrors backend `annotate_image()`:
+ *   - Components (the 10 names below) → green
+ *   - Everything else → red (defects)
+ */
+const COMPONENT_CLASS_KEYS: ReadonlySet<string> = new Set([
+  "conductor",
+  "bolted_connection",
+  "foreign_object",
+  "foundation_pedestal",
+  "insulator",
+  "suspension_clamp",
+  "transmission_corridor",
+  "two_glass",
+  "vibration_damper",
+  "yoke_plate",
+]);
 
-function bgrTupleToRgbCss(b: number, g: number, r: number): string {
-  return `rgb(${r}, ${g}, ${b})`;
+const COMPONENT_COLOR_CSS = "rgb(0, 200, 0)";
+const DEFECT_COLOR_CSS = "rgb(220, 0, 0)";
+
+function isComponentClassName(name: string | undefined | null): boolean {
+  if (!name) return false;
+  return COMPONENT_CLASS_KEYS.has(normalizeDetectionClassKey(name));
 }
 
-function annotationStrokeColorCss(classId: number): string {
-  const id = Number.isFinite(classId) ? Math.trunc(classId) : 0;
-  const idx = ((id % ANNOTATION_COLORS_BGR.length) + ANNOTATION_COLORS_BGR.length) % ANNOTATION_COLORS_BGR.length;
-  const [bb, gg, rr] = ANNOTATION_COLORS_BGR[idx]!;
-  return bgrTupleToRgbCss(bb, gg, rr);
+function annotationStrokeColorCss(_classId: number, className?: string): string {
+  return isComponentClassName(className) ? COMPONENT_COLOR_CSS : DEFECT_COLOR_CSS;
 }
 
-/** Label string and foreign_object rule aligned with `annotate_image(..., copy=True)`. */
-function serverStyleAnnotationLabel(row: DetectionRowLike, allRows: DetectionRowLike[]): string {
-  const foreignCount = allRows.filter(
-    (r) => normalizeDetectionClassKey(r.class_name ?? r.label) === "foreign_object"
-  ).length;
-  let raw = String(row.class_name ?? row.label ?? "").trim();
-  if (foreignCount > 3 && normalizeDetectionClassKey(raw) === "foreign_object") {
-    raw = "bolt_rust";
-  }
+/** Label string aligned with `annotate_image(..., copy=True)`. */
+function serverStyleAnnotationLabel(row: DetectionRowLike, _allRows: DetectionRowLike[]): string {
+  const raw = String(row.class_name ?? row.label ?? "").trim();
   const normalized = normalizeDetectionClassKey(raw);
   if (normalized === "conductor" || normalized === "foundation_pedestal") {
     return "Foundation Padesteal";
@@ -85,6 +85,16 @@ export function buildDetectionFilterClassKeys(
   modelNames.forEach((n) => keys.add(normalizeDetectionClassKey(n)));
   detectionRows.forEach((d) => keys.add(normalizeDetectionClassKey(d.class_name ?? d.label)));
   return [...keys].filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+
+/** Checkbox filter: only classes present on the current preview rows. */
+export function buildFilterClassKeysFromDetectionsOnly(detectionRows: DetectionRowLike[]): string[] {
+  const keys = new Set<string>();
+  for (const d of detectionRows) {
+    const k = normalizeDetectionClassKey(d.class_name ?? d.label);
+    if (k) keys.add(k);
+  }
+  return [...keys].sort((a, b) => a.localeCompare(b));
 }
 
 export function filterRowsByVisibleClasses<T extends DetectionRowLike>(rows: T[], hiddenKeys: Set<string>): T[] {
@@ -132,20 +142,13 @@ export function redrawRgbDetectionOverlay(
     if (!Array.isArray(b) || b.length < 4) continue;
     const [x1, y1, x2, y2] = b;
     if (![x1, y1, x2, y2].every((n) => Number.isFinite(n))) continue;
-    const cls = normalizeDetectionClassKey(d.class_name ?? d.label);
-    if (!BBOX_SIZE_FILTER_EXEMPT_KEYS.has(cls)) {
-      const bw = Math.abs(x2 - x1);
-      const bh = Math.abs(y2 - y1);
-      const areaRatio = (bw * bh) / (sourceW * sourceH);
-      if (areaRatio > lens.areaSkipAbove && bh < bw * 3) continue;
-    }
     const rx = ox + x1 * tx * ctr;
     const ry = oy + y1 * ty * ctr;
     const rw = (x2 - x1) * tx * ctr;
     const rh = (y2 - y1) * ty * ctr;
 
     const clsId = typeof d.class_id === "number" && Number.isFinite(d.class_id) ? d.class_id : 0;
-    const color = annotationStrokeColorCss(clsId);
+    const color = annotationStrokeColorCss(clsId, d.class_name ?? d.label);
     ctx.strokeStyle = color;
     ctx.lineWidth = linePx;
     ctx.strokeRect(rx, ry, rw, rh);
@@ -185,23 +188,16 @@ export function useDetectionModelClassNames(): string[] {
 /** Class checkbox filter + filtered rows for overlays / sidebar (RGB image live overlay, or list-only for video). */
 export function useDetectionClassFilterForRows(
   detectionRows: DetectionRowLike[],
-  resetKey: string | null | undefined,
-  opts?: { classKeysFromRows?: DetectionRowLike[] }
+  resetKey: string | null | undefined
 ) {
-  const modelClassNames = useDetectionModelClassNames();
   const [hiddenClassKeys, setHiddenClassKeys] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
 
-  const rowsForClassKeys =
-    opts?.classKeysFromRows != null && opts.classKeysFromRows.length > 0
-      ? opts.classKeysFromRows
-      : detectionRows;
-
   const hiddenSet = useMemo(() => new Set(hiddenClassKeys), [hiddenClassKeys]);
   const filterClassKeys = useMemo(
-    () => buildDetectionFilterClassKeys(modelClassNames, rowsForClassKeys),
-    [modelClassNames, rowsForClassKeys]
+    () => buildFilterClassKeysFromDetectionsOnly(detectionRows),
+    [detectionRows]
   );
   const filteredRows = useMemo(
     () => filterRowsByVisibleClasses(detectionRows, hiddenSet),
