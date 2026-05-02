@@ -123,7 +123,7 @@ sequenceDiagram
     B->>S: emit progress
     S->>F: update UI
   end
-  F->>B: GET /api/detection/results/{job_id}
+  F->>B: GET /api/detection/results/:job_id
   B-->>F: boxes, classes, metadata
   F->>U: Grid + sidebars + filters
 ```
@@ -137,7 +137,7 @@ flowchart TD
   B -->|ROI| D[POST /api/thermal/roi]
   B -->|Batch| E[POST /api/thermal/batch/start]
   E --> F[POST /api/thermal/batch/file]
-  F --> G[GET /api/thermal/batch/results/{job_id}]
+  F --> G[GET /api/thermal/batch/results/:job_id]
   C --> H[Charts & detail modal]
   D --> H
   G --> H
@@ -150,8 +150,8 @@ flowchart TD
 flowchart LR
   V1[POST /api/video/batch/start] --> V2[POST /api/video/upload]
   V2 --> V3[Encode / frame sample / infer]
-  V3 --> V4[GET /api/video/results/{vid_id}]
-  V4 --> V5[GET /api/video/detections/{file_id}]
+  V3 --> V4[GET /api/video/results/:vid_id]
+  V4 --> V5[GET /api/video/detections/:file_id]
   V5 --> UI[Timeline & detection UI]
 ```
 
