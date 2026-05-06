@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Filter, ChevronDown } from "lucide-react";
 import {
+  SIDEBAR_COMPONENT_CLASS_KEYS,
   detectionClassKeysForSharedFilterToggle,
   formatDetectionSidebarLabel,
   normalizeDetectionClassKey,
@@ -12,7 +13,7 @@ export const DETECTION_FILE_GRID_CLASS = "grid grid-cols-3 gap-2 sm:gap-3";
 
 /** Shared zoom limits for RGB image + canvas preview (Dashboard, AIDetection, Runs, RunDetail). */
 export const RGB_PREVIEW_ZOOM_MIN = 0.25;
-export const RGB_PREVIEW_ZOOM_MAX = 5;
+export const RGB_PREVIEW_ZOOM_MAX = 10;
 export const RGB_PREVIEW_ZOOM_STEP = 0.25;
 
 export type DetectionRowLike = {
@@ -23,23 +24,8 @@ export type DetectionRowLike = {
   class_id?: number;
 };
 
-/**
- * Two-tone box scheme that mirrors backend `annotate_image()`:
- *   - Components (the 10 names below) → green
- *   - Everything else → red (defects)
- */
-const COMPONENT_CLASS_KEYS: ReadonlySet<string> = new Set([
-  "conductor",
-  "bolted_connection",
-  "foreign_object",
-  "foundation_pedestal",
-  "insulator",
-  "suspension_clamp",
-  "transmission_corridor",
-  "two_glass",
-  "vibration_damper",
-  "yoke_plate",
-]);
+/** Same keys as video/RGB sidebar “Components” → green overlay; others → red. */
+const COMPONENT_CLASS_KEYS: ReadonlySet<string> = new Set(SIDEBAR_COMPONENT_CLASS_KEYS);
 
 const COMPONENT_COLOR_CSS = "rgb(0, 200, 0)";
 const DEFECT_COLOR_CSS = "rgb(220, 0, 0)";

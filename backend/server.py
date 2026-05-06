@@ -46,24 +46,27 @@ import uvicorn
 # ---------------------------------------------------------------------------
 # Paths & constants
 # ---------------------------------------------------------------------------
-_YOLO_WEIGHTS_FILE = (
+# Local mirror of RunPod training output (canonical pod path documented in description).
+_DOTA_WEIGHTS_FILE = (
     _DETECTION_SERVER_DIR
     / "models"
-    / "tl_defect_industrial 55.5 hours copy"
+    / "yolo11x_obb_dota_20260426_060214"
     / "weights"
     / "best.pt"
 )
 
 AVAILABLE_MODELS: dict[str, dict] = {
-    "tl_defect_industrial": {
-        "id": "tl_defect_industrial",
-        "title": "TL Defect Industrial",
-        "path": str(_YOLO_WEIGHTS_FILE),
-        "description": "tl_defect_industrial 55.5h · weights/best.pt",
+    "dota_1000ep_best": {
+        "id": "dota_1000ep_best",
+        "title": "DOTA 1000ep · YOLO11x OBB (RunPod H200)",
+        "path": str(_DOTA_WEIGHTS_FILE),
+        "description": (
+            "Pod weights path: /workspace/project/runs/obb/yolo11x_obb_dota_20260426_060214/weights/best.pt"
+        ),
     },
 }
 
-WEIGHTS_PATH = Path(AVAILABLE_MODELS["tl_defect_industrial"]["path"])
+WEIGHTS_PATH = Path(AVAILABLE_MODELS["dota_1000ep_best"]["path"])
 RESULTS_DIR = Path(__file__).parent / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
@@ -213,7 +216,16 @@ def get_sahi_model(confidence: float = 0.25):
 jobs: dict[str, dict] = {}
 
 
-def _new_job(total: int, confidence: float, slice_size: int, overlap: float, source: str = "rgb") -> dict:
+def _new_job(
+    total: int,
+    confidence: float,
+    slice_size: int,
+    overlap: float,
+    source: str = "rgb",
+    full_imgsz: int = 1280,
+    nms_iou: float = 0.5,
+    sahi_tiled: bool = True,
+) -> dict:
     job_id = uuid.uuid4().hex[:12]
     job = {
         "job_id": job_id,
@@ -221,6 +233,9 @@ def _new_job(total: int, confidence: float, slice_size: int, overlap: float, sou
         "confidence": confidence,
         "slice_size": slice_size,
         "overlap": overlap,
+        "full_imgsz": full_imgsz,
+        "nms_iou": nms_iou,
+        "sahi_tiled": sahi_tiled,
         "source": source,
         "files": {},          # file_id -> {filename, status, ...}
         "results": [],        # finished results
@@ -242,6 +257,17 @@ def _gps_for_map(job: dict, jid: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Ultralytics result parsing (detect vs OBB)
+# ---------------------------------------------------------------------------
+def _result_pred(r):
+    """Oriented-detection models populate ``r.obb``; standard detection uses ``r.boxes``."""
+    obb = getattr(r, "obb", None)
+    if obb is not None:
+        return obb
+    return getattr(r, "boxes", None)
+
+
+# ---------------------------------------------------------------------------
 # SAHI sliced inference
 # ---------------------------------------------------------------------------
 def run_sahi_detection(
@@ -252,8 +278,11 @@ def run_sahi_detection(
     job_id: str = "",
     file_id: str = "",
     loop: Optional[asyncio.AbstractEventLoop] = None,
+    full_imgsz: int = 1280,
+    nms_iou: float = 0.5,
+    sahi_tiled: bool = True,
 ):
-    """Run YOLO full-image + GPU-batched sliced inference on a single image."""
+    """Run YOLO full-image + optional GPU-batched tiled slices on a single image."""
     model = get_model()
 
     def _emit_progress(current: int, total_steps: int, pct: int):
@@ -269,12 +298,19 @@ def run_sahi_detection(
                 loop,
             )
 
+    total_steps = 2 if sahi_tiled else 1
+
     # Full-image pass on GPU (FP16 on CUDA via half= — same path as batched video)
-    _emit_progress(0, 2, 5)
-    full_results = model.predict(img, conf=confidence, device=DEVICE, verbose=False, **_yolo_predict_kw())
+    _emit_progress(0, total_steps, 5)
+    full_results = model.predict(
+        img, conf=confidence, device=DEVICE, imgsz=full_imgsz, verbose=False, **_yolo_predict_kw()
+    )
     full_dets = []
     for r in full_results:
-        for box in r.boxes:
+        pred = _result_pred(r)
+        if pred is None:
+            continue
+        for box in pred:
             cls_id = int(box.cls[0])
             full_dets.append({
                 "bbox": box.xyxy[0].tolist(),
@@ -283,47 +319,51 @@ def run_sahi_detection(
                 "class_name": model.names.get(cls_id, str(cls_id)),
                 "source": "full",
             })
-    _emit_progress(1, 2, 40)
-
-    # GPU-batched sliced prediction (all slices sent to GPU in batches instead of one-by-one)
-    img_h, img_w = img.shape[:2]
-    step_h = max(1, int(slice_size * (1 - overlap)))
-    step_w = max(1, int(slice_size * (1 - overlap)))
-
-    slices: list[np.ndarray] = []
-    offsets: list[tuple[int, int]] = []
-    for y in range(0, img_h, step_h):
-        for x in range(0, img_w, step_w):
-            y2 = min(y + slice_size, img_h)
-            x2 = min(x + slice_size, img_w)
-            slices.append(img[y:y2, x:x2])
-            offsets.append((x, y))
+    _emit_progress(1, total_steps, 40 if sahi_tiled else 85)
 
     sahi_dets: list[dict] = []
-    for b_start in range(0, len(slices), GPU_BATCH):
-        b_slices = slices[b_start : b_start + GPU_BATCH]
-        b_offsets = offsets[b_start : b_start + GPU_BATCH]
-        results = model.predict(
-            b_slices, conf=confidence, device=DEVICE,
-            imgsz=slice_size, verbose=False, **_yolo_predict_kw(),
-        )
-        for r, (x_off, y_off) in zip(results, b_offsets):
-            for box in r.boxes:
-                cls_id = int(box.cls[0])
-                bx1, by1, bx2, by2 = box.xyxy[0].tolist()
-                sahi_dets.append({
-                    "bbox": [bx1 + x_off, by1 + y_off, bx2 + x_off, by2 + y_off],
-                    "confidence": float(box.conf[0]),
-                    "class_id": cls_id,
-                    "class_name": model.names.get(cls_id, str(cls_id)),
-                    "source": "sahi",
-                })
+    if sahi_tiled:
+        # GPU-batched sliced prediction (all slices sent to GPU in batches instead of one-by-one)
+        img_h, img_w = img.shape[:2]
+        step_h = max(1, int(slice_size * (1 - overlap)))
+        step_w = max(1, int(slice_size * (1 - overlap)))
 
-    _emit_progress(2, 2, 85)
+        slices: list[np.ndarray] = []
+        offsets: list[tuple[int, int]] = []
+        for y in range(0, img_h, step_h):
+            for x in range(0, img_w, step_w):
+                y2 = min(y + slice_size, img_h)
+                x2 = min(x + slice_size, img_w)
+                slices.append(img[y:y2, x:x2])
+                offsets.append((x, y))
+
+        for b_start in range(0, len(slices), GPU_BATCH):
+            b_slices = slices[b_start : b_start + GPU_BATCH]
+            b_offsets = offsets[b_start : b_start + GPU_BATCH]
+            results = model.predict(
+                b_slices, conf=confidence, device=DEVICE,
+                imgsz=slice_size, verbose=False, **_yolo_predict_kw(),
+            )
+            for r, (x_off, y_off) in zip(results, b_offsets):
+                pred = _result_pred(r)
+                if pred is None:
+                    continue
+                for box in pred:
+                    cls_id = int(box.cls[0])
+                    bx1, by1, bx2, by2 = box.xyxy[0].tolist()
+                    sahi_dets.append({
+                        "bbox": [bx1 + x_off, by1 + y_off, bx2 + x_off, by2 + y_off],
+                        "confidence": float(box.conf[0]),
+                        "class_id": cls_id,
+                        "class_name": model.names.get(cls_id, str(cls_id)),
+                        "source": "sahi",
+                    })
+
+        _emit_progress(2, total_steps, 85)
 
     all_dets = full_dets + sahi_dets
     if len(all_dets) > 0:
-        all_dets = _nms_merge(all_dets, iou_threshold=0.5)
+        all_dets = _nms_merge(all_dets, iou_threshold=nms_iou)
 
     return all_dets
 
@@ -360,14 +400,48 @@ _BBOX_SIZE_FILTER_EXEMPT = frozenset(
     ("vegetation_encroachment", "tower_structural_corrosion", "simple_corrosion", "breakage_of_angle_braces", "bird_nest")
 )
 
+# Mirrors frontend SIDEBAR_COMPONENT_CLASS_KEYS — these draw GREEN; everything else draws RED.
+_COMPONENT_CLASS_KEYS = frozenset((
+    "insulator",
+    "foundation_pedestal",
+    "bolted_connection",
+    "conductor",
+    "vibration_damper",
+    "suspension_clamp",
+    "yoke_plate",
+    "transmission_corridor",
+    "angle_brace",
+    "cross_arm",
+    "two_glass",
+))
+_COMPONENT_BGR = (0, 255, 0)
+_DEFECT_BGR = (0, 0, 255)
+
 
 def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.ndarray:
     """Draw bounding boxes. Set copy=False for video frames (faster, in-place)."""
     canvas = img.copy() if copy else img
     font_scale = 0.5 if copy else 0.7
     font_thickness = 1 if copy else 2
+    model = get_model()
+    names = getattr(model, "names", None) or {}
+
+    def _visual_cls_key(det: dict) -> str:
+        """True YOLO class (video may remap ``class_name`` only; ``class_id`` stays)."""
+        try:
+            cid = int(det.get("class_id", -1))
+            if cid >= 0 and isinstance(names, dict):
+                raw = names.get(cid)
+                if raw is None:
+                    raw = names.get(str(cid))
+                if raw is not None:
+                    return str(raw).strip().lower().replace("-", "_").replace(" ", "_")
+        except Exception:
+            pass
+        return str(det.get("class_name") or "").strip().lower().replace("-", "_").replace(" ", "_")
+
     foreign_object_count = (
-        sum(1 for d in dets if str(d.get("class_name") or "").strip().lower() == "foreign_object")
+        sum(1 for d in dets if _visual_cls_key(d) == "foreign_object")
         if copy
         else 0
     )
@@ -376,17 +450,16 @@ def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.n
     for det in dets:
         x1, y1, x2, y2 = int(det["bbox"][0]), int(det["bbox"][1]), int(det["bbox"][2]), int(det["bbox"][3])
         class_name = str(det.get("class_name") or "").strip()
-        cls_lower = class_name.lower().replace("-", "_").replace(" ", "_")
-        if cls_lower not in _BBOX_SIZE_FILTER_EXEMPT and copy:
+        vk = _visual_cls_key(det)
+        if vk not in _BBOX_SIZE_FILTER_EXEMPT and copy:
             bw = abs(x2 - x1)
             bh = abs(y2 - y1)
             area_ratio = (bw * bh) / img_area
             if area_ratio > 0.003 and bh < bw * 3:
                 continue
-        cls_id = det.get("class_id", 0)
-        color = COLORS[cls_id % len(COLORS)]
+        color = _COMPONENT_BGR if vk in _COMPONENT_CLASS_KEYS else _DEFECT_BGR
         cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-        if copy and foreign_object_count > 3 and cls_lower == "foreign_object":
+        if copy and foreign_object_count > 3 and vk == "foreign_object":
             class_name = "bolt_rust"
         label = class_name or "Defect"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
@@ -402,6 +475,7 @@ def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.n
 # ---------------------------------------------------------------------------
 def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
                  confidence: float, slice_size: int, overlap: float,
+                 full_imgsz: int, nms_iou: float, sahi_tiled: bool,
                  loop: asyncio.AbstractEventLoop):
     """Process one image: detect, annotate, save thumb+annotated, return result dict."""
     t0 = time.time()
@@ -419,7 +493,10 @@ def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
     )
 
     # Run detection
-    dets = run_sahi_detection(img, confidence, slice_size, overlap, job_id, file_id, loop)
+    dets = run_sahi_detection(
+        img, confidence, slice_size, overlap, job_id, file_id, loop,
+        full_imgsz=full_imgsz, nms_iou=nms_iou, sahi_tiled=sahi_tiled,
+    )
     for d in dets:
         raw = str(d.get("class_name") or "").strip().lower().replace("-", " ").replace("_", " ")
         if raw == "bolted connection missing nut":
@@ -536,6 +613,9 @@ async def _worker(job_id: str):
                 process_file,
                 job_id, fid, fdata["bytes"], fdata["filename"],
                 job["confidence"], job["slice_size"], job["overlap"],
+                job.get("full_imgsz", 1280),
+                job.get("nms_iou", 0.5),
+                job.get("sahi_tiled", True),
                 loop,
             )
 
@@ -667,12 +747,18 @@ async def batch_start(payload: dict):
     if model_id and model_id in AVAILABLE_MODELS and AVAILABLE_MODELS[model_id]["path"] != _model_path:
         switch_model(model_id)
 
-    confidence = payload.get("det_confidence", 0.25)
-    slice_size = payload.get("det_slice_size", 640)
-    overlap = payload.get("det_overlap", 0.2)
+    confidence = float(payload.get("det_confidence", 0.25))
+    slice_size = int(payload.get("det_slice_size", 1280))
+    overlap = float(payload.get("det_overlap", 0.25))
+    full_imgsz = int(payload.get("det_full_imgsz", 1280))
+    nms_iou = float(payload.get("det_nms_iou", 0.5))
+    sahi_tiled = bool(payload.get("det_sahi_tiled", True))
     source = payload.get("source", "rgb")
 
-    job = _new_job(total, confidence, slice_size, overlap, source=source)
+    job = _new_job(
+        total, confidence, slice_size, overlap, source=source,
+        full_imgsz=full_imgsz, nms_iou=nms_iou, sahi_tiled=sahi_tiled,
+    )
 
     threading.Thread(target=get_model, daemon=True).start()
 
@@ -837,23 +923,27 @@ def _open_video_capture(path: str) -> cv2.VideoCapture:
     return cv2.VideoCapture(path)
 
 
-def _batch_detect(model, frames: list[np.ndarray], confidence: float) -> list[list[dict]]:
-    """Run YOLO on a batch of frames. imgsz=640, single GPU call."""
+def _batch_detect(
+    model, frames: list[np.ndarray], confidence: float, imgsz: int = 1280
+) -> list[list[dict]]:
+    """Run YOLO on a batch of frames (single GPU call)."""
     results = model.predict(
         frames, conf=confidence, device=DEVICE,
-        imgsz=640, verbose=False, **_yolo_predict_kw(),
+        imgsz=imgsz, verbose=False, **_yolo_predict_kw(),
     )
     per_frame: list[list[dict]] = []
     for r in results:
         dets = []
-        for box in r.boxes:
-            cls_id = int(box.cls[0])
-            dets.append({
-                "bbox": box.xyxy[0].tolist(),
-                "confidence": float(box.conf[0]),
-                "class_id": cls_id,
-                "class_name": model.names.get(cls_id, str(cls_id)),
-            })
+        pred = _result_pred(r)
+        if pred is not None:
+            for box in pred:
+                cls_id = int(box.cls[0])
+                dets.append({
+                    "bbox": box.xyxy[0].tolist(),
+                    "confidence": float(box.conf[0]),
+                    "class_id": cls_id,
+                    "class_name": model.names.get(cls_id, str(cls_id)),
+                })
         per_frame.append(dets)
     return per_frame
 
@@ -861,6 +951,7 @@ def _batch_detect(model, frames: list[np.ndarray], confidence: float) -> list[li
 def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                          confidence: float, slice_size: int, overlap: float,
                          frame_interval: float,
+                         full_imgsz: int,
                          loop: asyncio.AbstractEventLoop) -> dict:
     """GPU-saturated video pipeline:
     - Reader thread keeps a deep frame buffer ahead of GPU
@@ -885,6 +976,13 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
     raw_path = out_dir / "raw.mp4"
     writer = cv2.VideoWriter(str(raw_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
 
+    # Side-by-side un-annotated copy + per-frame bboxes power the client-side
+    # canvas overlay that filters detection boxes on the playing video.
+    original_raw_path = out_dir / "original_raw.mp4"
+    original_writer = cv2.VideoWriter(
+        str(original_raw_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)
+    )
+
     frame_q: queue.Queue = queue.Queue(maxsize=READ_AHEAD)
     read_done = threading.Event()
     write_q: queue.Queue = queue.Queue(maxsize=READ_AHEAD)
@@ -897,6 +995,7 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
     frames_done = 0
     thumb_saved = False
     all_detections_list: list[dict] = []
+    all_frame_dets: list[list[dict]] = []
 
     t0 = time.time()
 
@@ -944,7 +1043,7 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                 break
 
             # GPU inference (CPU annotation threads from the previous batch run concurrently)
-            per_frame_dets = _batch_detect(model, batch, confidence)
+            per_frame_dets = _batch_detect(model, batch, confidence, imgsz=full_imgsz)
             _remap_video_labels(per_frame_dets)
 
             # Flush previous batch: wait for its annotation, write frames, update counters
@@ -952,6 +1051,7 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                 for _fut in _prev_ann_futs:
                     _fut.result()
                 _pb, _pd = _prev_wb
+                all_frame_dets.extend(_pd)
                 for i, (frame, dets) in enumerate(zip(_pb, _pd)):
                     write_q.put(frame)
                     all_det_count += len(dets)
@@ -981,6 +1081,11 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                     loop,
                 )
 
+            # Capture un-annotated frames now — VideoWriter.write() copies pixels into the
+            # encoder synchronously, so subsequent in-place annotation cannot race the writer.
+            for _orig_frame in batch:
+                original_writer.write(_orig_frame)
+
             # Submit annotation for current batch (non-blocking; runs on CPU while next GPU batch executes)
             _prev_ann_futs = [_annotate_pool.submit(annotate_image, f, d, False)
                               for f, d in zip(batch, per_frame_dets)]
@@ -991,6 +1096,7 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
             for _fut in _prev_ann_futs:
                 _fut.result()
             _pb, _pd = _prev_wb
+            all_frame_dets.extend(_pd)
             for i, (frame, dets) in enumerate(zip(_pb, _pd)):
                 write_q.put(frame)
                 all_det_count += len(dets)
@@ -1028,6 +1134,10 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
         except Exception:
             pass
         try:
+            original_writer.release()
+        except Exception:
+            pass
+        try:
             cap.release()
         except Exception:
             pass
@@ -1041,6 +1151,11 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
         try:
             if raw_path.exists():
                 raw_path.unlink()
+        except Exception:
+            pass
+        try:
+            if original_raw_path.exists():
+                original_raw_path.unlink()
         except Exception:
             pass
         try:
@@ -1064,6 +1179,19 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
         except Exception:
             pass
 
+    # H.264 re-encode the un-annotated copy used by the client overlay player.
+    original_h264_path = out_dir / "original.mp4"
+    if not _reencode_to_h264(str(original_raw_path), str(original_h264_path), fps):
+        try:
+            shutil.move(str(original_raw_path), str(original_h264_path))
+        except Exception:
+            pass
+    else:
+        try:
+            os.unlink(str(original_raw_path))
+        except Exception:
+            pass
+
     try:
         os.unlink(tmp_path)
     except Exception:
@@ -1075,16 +1203,36 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
             json.dump(all_detections_list, fp)
     except Exception:
         pass
+    try:
+        with open(out_dir / "detections_frames.json", "w", encoding="utf-8") as fp:
+            json.dump([
+                [
+                    {
+                        "bbox": d.get("bbox"),
+                        "confidence": d.get("confidence", 0),
+                        "class_id": d.get("class_id", 0),
+                        "class_name": d.get("class_name", ""),
+                    }
+                    for d in frame_dets
+                ]
+                for frame_dets in all_frame_dets
+            ], fp)
+    except Exception:
+        pass
     return {
         "total_frames": total_frames,
         "frames_analyzed": frames_done,
         "duration": round(duration, 2),
         "fps": round(fps, 2),
+        "video_width": int(w),
+        "video_height": int(h),
         "total_detections": all_det_count,
         "avg_confidence": round(avg_conf, 4),
         "max_confidence": round(max_conf, 4),
         "thumb_url": f"/results/{file_id}/thumb.jpg",
         "video_url": f"/results/{file_id}/annotated.mp4",
+        "original_url": f"/results/{file_id}/original.mp4",
+        "frames_url": f"/results/{file_id}/detections_frames.json",
         "detections": all_detections_list,
     }
 
@@ -1130,7 +1278,7 @@ def _collect_detections_from_video_file(video_path: str, confidence: float) -> l
                 batch.append(frm)
             if not batch:
                 break
-            per_frame_dets = _batch_detect(model, batch, confidence)
+            per_frame_dets = _batch_detect(model, batch, confidence, imgsz=1280)
             _remap_video_labels(per_frame_dets)
             for dets in per_frame_dets:
                 for d in dets:
@@ -1220,6 +1368,7 @@ async def _video_item_worker(job_id: str):
                 job_id, fid, fdata["tmp_path"],
                 vjob["confidence"], vjob["slice_size"], vjob["overlap"],
                 vjob.get("frame_interval", 1),
+                int(vjob.get("full_imgsz", 1280)),
                 loop,
             )
             fdata["status"] = "done"
@@ -1274,9 +1423,10 @@ async def video_batch_start(payload: dict):
         "job_id": vid_id,
         "total": total,
         "completed": 0,
-        "confidence": payload.get("det_confidence", 0.25),
-        "slice_size": payload.get("det_slice_size", 640),
-        "overlap": payload.get("det_overlap", 0.2),
+        "confidence": float(payload.get("det_confidence", 0.25)),
+        "slice_size": int(payload.get("det_slice_size", 1280)),
+        "overlap": float(payload.get("det_overlap", 0.25)),
+        "full_imgsz": int(payload.get("det_full_imgsz", 1280)),
         "frame_interval": payload.get("frame_interval", 1),
         "files": {},
         "status": "active",

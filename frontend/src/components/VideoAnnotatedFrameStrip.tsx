@@ -1,6 +1,31 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  SIDEBAR_COMPONENT_CLASS_KEYS,
+  SIDEBAR_HIDDEN_CLASS_KEYS,
+  normalizeDetectionClassKey,
+} from "../utils/detectionSidebarBuckets";
 
 const PREVIEW_FRAME_GRID_MAX = 48;
+
+const COMPONENT_CLASS_SET = new Set<string>(SIDEBAR_COMPONENT_CLASS_KEYS);
+const NO_HIDDEN_CLASSES: ReadonlySet<string> = new Set();
+
+type FrameDetection = { class_name?: string };
+
+function frameHasVisibleSidebarDefect(
+  dets: FrameDetection[],
+  hiddenClassKeys: ReadonlySet<string>
+): boolean {
+  for (const d of dets) {
+    const key = normalizeDetectionClassKey(d.class_name);
+    if (!key) continue;
+    if (SIDEBAR_HIDDEN_CLASS_KEYS.has(key)) continue;
+    if (COMPONENT_CLASS_SET.has(key)) continue;
+    if (hiddenClassKeys.has(key)) continue;
+    return true;
+  }
+  return false;
+}
 
 function formatTimeSec(s: number) {
   const m = Math.floor(s / 60);
@@ -14,6 +39,10 @@ export type VideoAnnotatedFrameStripProps = {
   fps: number;
   framesAnalyzed: number;
   mainVideoRef: React.RefObject<HTMLVideoElement | null>;
+  /** Per-frame detections JSON (same as video overlay); when missing, defect outlines are off. */
+  framesUrl?: string;
+  /** Sidebar class filter: hidden defect classes are ignored for red frame outline. */
+  hiddenClassKeys?: ReadonlySet<string>;
 };
 
 /**
@@ -26,9 +55,32 @@ export function VideoAnnotatedFrameStrip({
   fps,
   framesAnalyzed,
   mainVideoRef,
+  framesUrl,
+  hiddenClassKeys = NO_HIDDEN_CLASSES,
 }: VideoAnnotatedFrameStripProps) {
   const captureVideoRef = useRef<HTMLVideoElement>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [perFrameDets, setPerFrameDets] = useState<FrameDetection[][] | null>(null);
+
+  useEffect(() => {
+    if (!framesUrl) {
+      setPerFrameDets(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(framesUrl, { cache: "force-cache" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (cancelled) return;
+        setPerFrameDets(Array.isArray(data) ? (data as FrameDetection[][]) : []);
+      })
+      .catch(() => {
+        if (!cancelled) setPerFrameDets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [framesUrl]);
 
   const slots = useMemo(() => {
     if (!videoUrl) return [];
@@ -44,6 +96,18 @@ export function VideoAnnotatedFrameStrip({
       return { k, fi, t };
     });
   }, [videoUrl, duration, fps, framesAnalyzed]);
+
+  const defectSlotKeys = useMemo(() => {
+    const out = new Set<string>();
+    if (!perFrameDets || perFrameDets.length === 0) return out;
+    for (const slot of slots) {
+      const row = perFrameDets[slot.fi];
+      if (row && frameHasVisibleSidebarDefect(row, hiddenClassKeys)) {
+        out.add(String(slot.k));
+      }
+    }
+    return out;
+  }, [slots, perFrameDets, hiddenClassKeys]);
 
   useEffect(() => {
     if (!videoUrl || slots.length === 0) {
@@ -160,11 +224,15 @@ export function VideoAnnotatedFrameStrip({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
           <div className="grid grid-cols-2 gap-2">
-            {slots.map((slot) => (
+            {slots.map((slot) => {
+              const defectOutline = defectSlotKeys.has(String(slot.k));
+              return (
               <button
                 key={slot.k}
                 type="button"
-                className="group overflow-hidden rounded-lg border text-left transition-colors hover:border-cyan-500/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50"
+                className={`group overflow-hidden rounded-lg border text-left transition-colors hover:border-cyan-500/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50 ${
+                  defectOutline ? "outline outline-2 outline-red-500 outline-offset-0" : ""
+                }`}
                 style={{ borderColor: "var(--dash-panel-border)", backgroundColor: "var(--dash-nested-bg)" }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -190,7 +258,8 @@ export function VideoAnnotatedFrameStrip({
                   {formatTimeSec(slot.t)}
                 </div>
               </button>
-            ))}
+            );
+            })}
           </div>
         </div>
       </div>

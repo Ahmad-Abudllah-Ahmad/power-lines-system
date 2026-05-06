@@ -11,7 +11,7 @@ $IconPath     = Join-Path $ProjectRoot "app-icon.ico"
 $LauncherBat  = Join-Path $ProjectRoot "launcher.bat"
 $ConvertScript = Join-Path $ProjectRoot "tools\convert_icon.py"
 $DesktopPath  = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath = Join-Path $DesktopPath "AzerEnerji Dashboard.lnk"
+$ShortcutPath = Join-Path $DesktopPath "Azeri Enerji Dashboard v3.lnk"
 
 Write-Host ""
 Write-Host "==============================================================" -ForegroundColor Cyan
@@ -54,7 +54,7 @@ $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
 $Shortcut.TargetPath = $LauncherBat
 $Shortcut.WorkingDirectory = $ProjectRoot
 $Shortcut.IconLocation = "$IconPath, 0"
-$Shortcut.Description = "Launch AzerEnerji Energy Dashboard (Backend + Frontend)"
+$Shortcut.Description = "Launch Azeri Enerji Dashboard v3 (Backend + Frontend)"
 $Shortcut.WindowStyle = 1
 $Shortcut.Save()
 
@@ -64,5 +64,5 @@ Write-Host "  Desktop shortcut created successfully!" -ForegroundColor Green
 Write-Host "  Location: $ShortcutPath" -ForegroundColor Green
 Write-Host "==============================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Double-click 'AzerEnerji Dashboard' on your desktop to launch." -ForegroundColor White
+Write-Host "  Double-click 'Azeri Enerji Dashboard v3' on your desktop to launch." -ForegroundColor White
 Write-Host ""

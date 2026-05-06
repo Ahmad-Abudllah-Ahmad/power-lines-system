@@ -30,6 +30,7 @@ import {
 import { useTheme } from "../context/ThemeContext";
 import { toast } from "../components/Toast";
 import { VideoAnnotatedFrameStrip } from "../components/VideoAnnotatedFrameStrip";
+import { VideoJobPreviewShell } from "../components/VideoJobPreviewShell";
 import {
   ThermalAnalysisDetailModal,
   type ThermalStats,
@@ -52,6 +53,7 @@ import {
   useDetectionClassFilterForRows,
   useRgbPreviewDetectionOverlay,
 } from "../components/DetectionClassFilter";
+import { videoResultsAuxUrlsFromAnnotatedVideoUrl } from "../utils/videoJobUrls";
 import {
   LayoutDashboard,
   CheckCircle2,
@@ -268,6 +270,10 @@ type DashboardRunFile = {
   image_width?: number | null;
   image_height?: number | null;
   video_url?: string | null;
+  original_url?: string | null;
+  frames_url?: string | null;
+  video_width?: number | null;
+  video_height?: number | null;
   detections?: Array<{ class_name?: string; confidence?: number }>;
   stats?: {
     total_defects?: number;
@@ -327,6 +333,7 @@ function RecentBatchUploadDetailModal({
   batchDetailImgZoom,
   setBatchDetailImgZoom,
   batchDetailVideoRef,
+  batchVideoFullscreenHostRef,
   onClose,
   onFileIndexChange,
 }: {
@@ -341,6 +348,7 @@ function RecentBatchUploadDetailModal({
   batchDetailImgZoom: number;
   setBatchDetailImgZoom: React.Dispatch<React.SetStateAction<number>>;
   batchDetailVideoRef: React.RefObject<HTMLVideoElement | null>;
+  batchVideoFullscreenHostRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
   onFileIndexChange: (index: number) => void;
 }) {
@@ -381,7 +389,20 @@ function RecentBatchUploadDetailModal({
     batchDetailVideoDets
   ) as DetectionRowLike[];
 
-  const clsFilter = useDetectionClassFilterForRows(previewDetectionRows, runId);
+  const clsFilter = useDetectionClassFilterForRows(previewDetectionRows, `${runId}:${safeIdx}`);
+
+  const batchVideoOverlayUrls = useMemo(() => {
+    if (!videoSrc) return { originalUrl: undefined as string | undefined, framesUrl: undefined as string | undefined };
+    const c = cur as DashboardRunFile & { original_url?: string | null; frames_url?: string | null };
+    let originalUrl = c.original_url?.trim() ? resolveMediaSrc(c.original_url) : undefined;
+    let framesUrl = c.frames_url?.trim() ? resolveMediaSrc(c.frames_url) : undefined;
+    const derived = videoResultsAuxUrlsFromAnnotatedVideoUrl(videoSrc);
+    if (derived) {
+      if (!originalUrl) originalUrl = derived.originalUrl;
+      if (!framesUrl) framesUrl = derived.framesUrl;
+    }
+    return { originalUrl, framesUrl };
+  }, [videoSrc, cur]);
 
   const previewSidebarPartition = useMemo(() => {
     if (!previewDetectionRows.length) return null;
@@ -424,6 +445,16 @@ function RecentBatchUploadDetailModal({
 
   const showLiveThumbOverlay =
     !videoSrc && previewHasSourceDims && Boolean(previewOverlaySrc);
+
+  const batchVideoSidebarComplete = ["completed", "complete"].includes(
+    String(run?.status ?? "").toLowerCase()
+  );
+  const formatVideoSidebarDuration = (sec: number) => {
+    const s = Math.max(0, sec || 0);
+    const m = Math.floor(s / 60);
+    const r = Math.floor(s % 60);
+    return `${m}:${r.toString().padStart(2, "0")}`;
+  };
 
   return (
     <div
@@ -647,13 +678,24 @@ function RecentBatchUploadDetailModal({
           <div className="flex min-h-0 flex-1 flex-col pt-12 pb-6 lg:flex-row lg:items-stretch">
             <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto scrollbar-gutter-stable p-6">
               {videoSrc ? (
-                <video
-                  ref={batchDetailVideoRef}
-                  key={videoSrc}
-                  src={videoSrc}
-                  controls
-                  playsInline
-                  className="max-h-[min(85vh,820px)] max-w-full rounded-xl border border-[var(--dash-preview-border)] shadow-lg"
+                <VideoJobPreviewShell
+                  videoUrl={videoSrc}
+                  originalUrl={batchVideoOverlayUrls.originalUrl}
+                  framesUrl={batchVideoOverlayUrls.framesUrl}
+                  fps={cur?.fps ?? 30}
+                  videoWidth={cur?.video_width ?? undefined}
+                  videoHeight={cur?.video_height ?? undefined}
+                  hiddenClassKeys={clsFilter.hiddenSet}
+                  videoRef={batchDetailVideoRef}
+                  fullscreenHostRef={batchVideoFullscreenHostRef}
+                  zoom={batchDetailImgZoom}
+                  setZoom={setBatchDetailImgZoom}
+                  panResetKey={`${runId}:${safeIdx}:v`}
+                  exitFullscreenDependency={`${runId}:${safeIdx}`}
+                  toolbarClassName="absolute left-3 top-[calc(3rem+0.5rem)] z-20 flex items-center gap-0.5 rounded-xl border border-[var(--dash-panel-border)] overflow-hidden shadow-lg lg:top-14"
+                  scrollAreaClassName="flex min-h-0 flex-1 flex-col items-center justify-center"
+                  shellExtraClassName="self-stretch w-full min-w-0"
+                  playerClassName="max-h-[min(85vh,820px)] w-full max-w-full rounded-xl border border-[var(--dash-preview-border)] bg-black shadow-lg"
                 />
               ) : mainImg ? (
                 <div
@@ -699,6 +741,8 @@ function RecentBatchUploadDetailModal({
                   fps={cur.fps ?? 0}
                   framesAnalyzed={cur.frames_analyzed ?? 0}
                   mainVideoRef={batchDetailVideoRef}
+                  framesUrl={batchVideoOverlayUrls.framesUrl}
+                  hiddenClassKeys={clsFilter.hiddenSet}
                 />
               </div>
             )}
@@ -716,10 +760,13 @@ function RecentBatchUploadDetailModal({
     {/* ════════════════════════════════════════
         RIGHT PANEL — Stats & details
     ════════════════════════════════════════ */}
-    <div className="w-full lg:w-[380px] shrink-0 border-t lg:border-t-0 lg:border-l border-dash dash-modal-aside flex flex-col max-h-[55vh] lg:max-h-[100dvh] overflow-hidden">
+    <div
+      className="w-full lg:w-[320px] shrink-0 border-t lg:border-t-0 lg:border-l border-[var(--dash-panel-border)] flex flex-col max-h-[55vh] lg:max-h-[100dvh] overflow-hidden"
+      style={{ backgroundColor: "var(--dash-modal-aside)" }}
+    >
 
       {/* Tab bar */}
-      <div className="flex shrink-0 items-stretch border-b border-dash">
+      <div className="flex shrink-0 items-stretch border-b border-[var(--dash-panel-border)]">
         <button
           type="button"
           onClick={() => setBatchDetailTab("image")}
@@ -743,24 +790,26 @@ function RecentBatchUploadDetailModal({
           PROCESSING
         </button>
 
-        <div className="relative flex shrink-0 items-center justify-end border-l border-dash px-2 py-2">
-          <DetectionClassFilterDropdown
-            filterClassKeys={clsFilter.filterClassKeys}
-            hiddenSet={clsFilter.hiddenSet}
-            open={clsFilter.open}
-            setOpen={clsFilter.setOpen}
-            anchorRef={clsFilter.anchorRef}
-            toggleKey={clsFilter.toggleKey}
-            showAll={clsFilter.showAll}
-            hideAll={clsFilter.hideAll}
-            liveOverlayEnabled={!videoSrc && showLiveThumbOverlay}
-          />
-        </div>
+        {!isVideoJob && (
+          <div className="relative flex shrink-0 items-center justify-end border-l border-[var(--dash-panel-border)] px-2 py-2">
+            <DetectionClassFilterDropdown
+              filterClassKeys={clsFilter.filterClassKeys}
+              hiddenSet={clsFilter.hiddenSet}
+              open={clsFilter.open}
+              setOpen={clsFilter.setOpen}
+              anchorRef={clsFilter.anchorRef}
+              toggleKey={clsFilter.toggleKey}
+              showAll={clsFilter.showAll}
+              hideAll={clsFilter.hideAll}
+              liveOverlayEnabled={!videoSrc && showLiveThumbOverlay}
+            />
+          </div>
+        )}
 
         <button
           type="button"
           onClick={onClose}
-          className="flex shrink-0 items-center justify-center px-3 border-l border-dash hover:bg-[var(--dash-hover-bg)] transition-colors"
+          className="flex shrink-0 items-center justify-center px-3 border-l border-[var(--dash-panel-border)] hover:bg-[var(--dash-hover-bg)] transition-colors"
           aria-label="Close"
         >
           <X size={18} className="dash-text-subtle" />
@@ -770,6 +819,176 @@ function RecentBatchUploadDetailModal({
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {batchDetailTab === "image" ? (
+          isVideoJob ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="shrink-0 p-4 border-b border-[var(--dash-panel-border)]">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="px-2 py-0.5 rounded text-xs font-bold border bg-purple-500/20 text-purple-300 border-purple-500/50">
+                    VIDEO
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-xs font-bold border ${
+                      batchVideoSidebarComplete
+                        ? "bg-green-500/20 text-green-300 border-green-500/50"
+                        : "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                    }`}
+                  >
+                    {batchVideoSidebarComplete ? "COMPLETE" : "PROCESSING"}
+                  </span>
+                </div>
+                <div className="text-sm font-Poppins dash-text-muted truncate" title={runId}>
+                  ID: {runId}
+                </div>
+                <div className="text-xs dash-text-subtle mt-1">{shortAgo(created)}</div>
+              </div>
+
+              <div className="shrink-0 p-4 border-b border-[var(--dash-panel-border)] text-center">
+                <div
+                  className="rounded-lg border border-[var(--dash-panel-border)] p-3 min-w-0"
+                  style={{ backgroundColor: "var(--dash-inset-bg)" }}
+                >
+                  <div className="text-xs dash-text-muted font-medium uppercase tracking-wide mb-1">Detections</div>
+                  {previewDetectionRows.length === 0 &&
+                  (cur?.total_detections ?? 0) > 0 &&
+                  batchDetailVideoDetsLoading ? (
+                    <div className="mt-0.5 text-sm font-bold dash-text-subtle">Loading…</div>
+                  ) : previewSidebarPartition ? (
+                    <div
+                      className={`mt-0.5 flex flex-wrap items-center justify-center gap-x-4 text-sm font-semibold leading-snug ${
+                        previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-green-400"
+                      }`}
+                    >
+                      <span>{previewSidebarPartition.components.length} components</span>
+                      <span>{previewSidebarPartition.defects.length} defects</span>
+                    </div>
+                  ) : (
+                    <div
+                      className={`text-xl font-bold tabular-nums ${
+                        defectsFound > 0 ? "text-red-400" : "text-green-400"
+                      }`}
+                    >
+                      {defectsFound}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {cur && (
+                <div className="shrink-0 p-4 border-b border-[var(--dash-panel-border)]">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs dash-text-muted mb-2">Current File</div>
+                      <div className="text-sm dash-text-primary truncate font-medium" title={cur.filename}>
+                        {cur.filename}
+                      </div>
+                    </div>
+                    <DetectionClassFilterDropdown
+                      filterClassKeys={clsFilter.filterClassKeys}
+                      hiddenSet={clsFilter.hiddenSet}
+                      open={clsFilter.open}
+                      setOpen={clsFilter.setOpen}
+                      anchorRef={clsFilter.anchorRef}
+                      toggleKey={clsFilter.toggleKey}
+                      showAll={clsFilter.showAll}
+                      hideAll={clsFilter.hideAll}
+                      liveOverlayEnabled={Boolean(
+                        videoSrc && batchVideoOverlayUrls.originalUrl && batchVideoOverlayUrls.framesUrl
+                      )}
+                    />
+                  </div>
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div className="flex justify-between dash-text-body">
+                      <span>Duration</span>
+                      <span className="dash-text-primary font-semibold">
+                        {formatVideoSidebarDuration(Number(cur.duration) || 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between dash-text-body">
+                      <span>FPS</span>
+                      <span className="dash-text-primary font-semibold">{cur.fps ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between dash-text-body">
+                      <span>Frames Analyzed</span>
+                      <span className="dash-text-primary font-semibold">{cur.frames_analyzed ?? 0}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(cur?.total_detections ?? 0) > 0 &&
+                batchDetailVideoDetsLoading &&
+                previewDetectionRows.length === 0 && (
+                  <div className="shrink-0 border-b border-[var(--dash-panel-border)] p-4 text-xs dash-text-subtle">
+                    Loading defect list…
+                  </div>
+                )}
+
+              {previewSidebarPartition &&
+                (previewSidebarPartition.components.length > 0 ||
+                  previewSidebarPartition.defects.length > 0) && (
+                  <div className="shrink-0 px-4 pb-3">
+                    <div className="overflow-hidden rounded-lg border border-dash">
+                      <DetectionSidebarBucketPanels partition={previewSidebarPartition} hideRowCounts />
+                    </div>
+                  </div>
+                )}
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:hidden">
+                <div className="text-xs dash-text-muted mb-3">All Files ({n})</div>
+                <div className="flex flex-col gap-2 max-h-[240px] overflow-y-auto pr-1">
+                  {files.map((f, i) => {
+                    const thumb = resolveMediaSrc(f.thumb_url || f.annotated_url);
+                    const dc = fileDefectCount(f, true);
+                    const sel = i === safeIdx;
+                    return (
+                      <button
+                        key={`${f.file_id ?? f.filename}-${i}`}
+                        type="button"
+                        onClick={() => setIdx(i)}
+                        className={[
+                          "rounded-lg border text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400",
+                          "flex items-center gap-2.5 p-2",
+                          sel
+                            ? "border-cyan-500/70 bg-cyan-500/10 ring-1 ring-cyan-500/30"
+                            : "border-dash bg-[var(--dash-nested-bg-soft)] hover:border-[var(--dash-thumb-border-hover)] hover:bg-[var(--dash-hover-bg)]",
+                        ].join(" ")}
+                      >
+                        <div className="relative w-10 h-10 shrink-0 rounded-md overflow-hidden bg-[var(--dash-inset-bg)]">
+                          {thumb ? (
+                            <img src={thumb} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <span className="absolute inset-0 flex items-center justify-center">
+                              <ImageIcon className="h-4 w-4 text-[var(--dash-subtle)]" />
+                            </span>
+                          )}
+                          {isMp4Url(f.video_url ?? undefined) && (
+                            <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
+                              <Video className="w-3.5 h-3.5 text-white drop-shadow" aria-hidden />
+                            </span>
+                          )}
+                          {sel && (
+                            <span className="absolute bottom-0.5 right-0.5 bg-emerald-500 rounded-full p-0.5 z-[1] shadow">
+                              <Check size={7} className="text-white" strokeWidth={3} />
+                            </span>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[9px] dash-text-primary truncate leading-snug" title={f.filename}>
+                            {f.filename}
+                          </div>
+                          <span className={`text-[8px] font-semibold ${dc > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                            {Array.isArray(f.detections) && f.detections.length > 0
+                              ? `${uniqueDefectTypeCount(f.detections)}d`
+                              : `${dc}d`}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
           <div className="p-4 space-y-5">
 
             {/* Run ID + timestamp */}
@@ -924,6 +1143,7 @@ function RecentBatchUploadDetailModal({
                 </div>
               )}
           </div>
+          )
         ) : (
           /* Processing tab */
           <div className="p-4 space-y-4 text-sm dash-text-body">
@@ -976,7 +1196,7 @@ function RecentBatchUploadDetailModal({
       {/* Footer CTA */}
       <div className="shrink-0 border-t border-dash p-3">
         <Link
-          to={`/runs/${runId}`}
+          to={`/runs?batch=${encodeURIComponent(runId)}&highlight=1`}
           className="flex items-center justify-center gap-2 w-full rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 py-2.5 text-xs font-semibold hover:bg-cyan-500/30 transition-colors"
           onClick={onClose}
         >
@@ -1339,7 +1559,8 @@ export default function Dashboard() {
     framesAnalyzed?: number;
   } | null>(null);
   const recentQuickPreviewVideoRef = useRef<HTMLVideoElement>(null);
-  const batchDetailVideoRef = useRef<HTMLVideoElement>(null);
+  const batchDetailVideoRef = useRef<HTMLVideoElement | null>(null);
+  const batchVideoFullscreenHostRef = useRef<HTMLDivElement | null>(null);
   const [recentBatchDetail, setRecentBatchDetail] = useState<{ runId: string; fileIndex: number } | null>(
     null
   );
@@ -1792,7 +2013,13 @@ export default function Dashboard() {
     const gal = recentRunGallery[recentBatchDetail.runId];
     const nNav = Math.max(gal?.urls?.length ?? 0, 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setRecentBatchDetail(null);
+      if (e.key === "Escape") {
+        const host = batchVideoFullscreenHostRef.current;
+        const doc = document as Document & { webkitFullscreenElement?: Element | null };
+        const fs = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+        if (host && fs === host) return;
+        setRecentBatchDetail(null);
+      }
       if (!isDjiThermal || nNav <= 0) return;
       if (e.key === "ArrowLeft") {
         setRecentBatchDetail((prev) =>
@@ -1884,7 +2111,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     setBatchDetailImgZoom(1);
-  }, [recentBatchDetail?.runId]);
+  }, [recentBatchDetail?.runId, recentBatchDetail?.fileIndex]);
+
+  useEffect(() => {
+    if (recentBatchDetail) return;
+    const doc = document as Document & {
+      webkitExitFullscreen?: () => Promise<void>;
+      webkitFullscreenElement?: Element | null;
+    };
+    const fs = document.fullscreenElement ?? doc.webkitFullscreenElement;
+    if (fs) void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.());
+  }, [recentBatchDetail]);
 
   const dashThermalDetail = useMemo(() => {
     if (!recentBatchDetail) return null;
@@ -3203,6 +3440,7 @@ export default function Dashboard() {
                   batchDetailImgZoom={batchDetailImgZoom}
                   setBatchDetailImgZoom={setBatchDetailImgZoom}
                   batchDetailVideoRef={batchDetailVideoRef}
+                  batchVideoFullscreenHostRef={batchVideoFullscreenHostRef}
                   onClose={() => setRecentBatchDetail(null)}
                   onFileIndexChange={(i) =>
                     setRecentBatchDetail((prev) =>

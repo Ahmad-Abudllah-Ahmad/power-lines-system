@@ -99,10 +99,10 @@ export default function AIDetection() {
   const [processing, setProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ completed: 0, total: 0 });
   const [config, setConfig] = useState({
-    confidence: 0.20,
+    confidence: 0.25,
     sliceSize: 1280,
     overlap: 0.25,
-    nmsIou: 0.10,
+    nmsIou: 0.5,
     fullImgsz: 1280,
     sahiTiled: true,
   });

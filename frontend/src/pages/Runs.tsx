@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { toast } from "../components/Toast";
 import { VideoAnnotatedFrameStrip } from "../components/VideoAnnotatedFrameStrip";
+import { VideoJobPreviewShell } from "../components/VideoJobPreviewShell";
 import { DetectionSidebarBucketPanels } from "../components/DetectionSidebarBucketPanels";
 import {
   ThermalAnalysisDetailHeader,
@@ -56,6 +57,7 @@ import {
   useRgbPreviewDetectionOverlay,
 } from "../components/DetectionClassFilter";
 import { useRgbPreviewPan } from "../utils/useRgbPreviewPan";
+import { videoResultsAuxUrlsFromAnnotatedVideoUrl } from "../utils/videoJobUrls";
 
 function resolveThermalFetchUrl(u: string): string {
   if (!u) return "";
@@ -74,6 +76,11 @@ type FileInfo = {
   thumb_url?: string;
   annotated_url?: string;
   video_url?: string;
+  /** Same job folder as `video_url` / `annotated.mp4` — from API when present. */
+  original_url?: string;
+  frames_url?: string;
+  video_width?: number | null;
+  video_height?: number | null;
   /** Per-box list (images from SAHI; videos: all boxes across frames, from detection server). */
   detections?: any[];
   image_width?: number | null;
@@ -511,7 +518,8 @@ export default function Runs() {
   const [thermalScanRoiEnd, setThermalScanRoiEnd] = useState<{ x: number; y: number } | null>(null);
   const [thermalScanRoiStats, setThermalScanRoiStats] = useState<ThermalStats | null>(null);
   const [thermalScanRoiLoading, setThermalScanRoiLoading] = useState(false);
-  const runsPreviewVideoRef = useRef<HTMLVideoElement>(null);
+  const runsPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const runsVideoFullscreenHostRef = useRef<HTMLDivElement | null>(null);
   const runsPreviewImgRef = useRef<HTMLImageElement>(null);
   const runsPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -722,6 +730,20 @@ export default function Runs() {
     previewDetectionRows as DetectionRowLike[],
     previewClassFilterResetKey
   );
+
+  const runsVideoOverlayUrls = useMemo(() => {
+    if (!previewFile?.video_url?.trim()) return { originalUrl: undefined as string | undefined, framesUrl: undefined as string | undefined };
+    const ext = previewFile as FileInfo & { original_url?: string; frames_url?: string };
+    let originalUrl = ext.original_url?.trim() ? resolveThermalFetchUrl(ext.original_url.trim()) : undefined;
+    let framesUrl = ext.frames_url?.trim() ? resolveThermalFetchUrl(ext.frames_url.trim()) : undefined;
+    const absVideo = resolveThermalFetchUrl(previewFile.video_url.trim());
+    const derived = videoResultsAuxUrlsFromAnnotatedVideoUrl(absVideo);
+    if (derived) {
+      if (!originalUrl) originalUrl = derived.originalUrl;
+      if (!framesUrl) framesUrl = derived.framesUrl;
+    }
+    return { originalUrl, framesUrl };
+  }, [previewFile]);
 
   const generateSelectedReport = useCallback(async () => {
     const selected = runs.filter((r) => selectedRunIds.has(r.run_id));
@@ -1449,7 +1471,13 @@ ${pdfPageChunks.join("\n")}
   useEffect(() => {
     if (!previewRun) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closePreview();
+      if (e.key === "Escape") {
+        const host = runsVideoFullscreenHostRef.current;
+        const doc = document as Document & { webkitFullscreenElement?: Element | null };
+        const fs = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+        if (host && fs === host) return;
+        closePreview();
+      }
       if (e.key === "ArrowLeft") navigatePreview(-1);
       if (e.key === "ArrowRight") navigatePreview(1);
     };
@@ -1458,8 +1486,18 @@ ${pdfPageChunks.join("\n")}
   }, [previewRun, closePreview]);
 
   useEffect(() => {
+    if (previewRun) return;
+    const doc = document as Document & {
+      webkitExitFullscreen?: () => Promise<void>;
+      webkitFullscreenElement?: Element | null;
+    };
+    const fs = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+    if (fs) void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.());
+  }, [previewRun]);
+
+  useEffect(() => {
     setPreviewModalZoom(1);
-  }, [previewRun?.run_id]);
+  }, [previewRun?.run_id, previewFileIdx]);
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} className="space-y-6">
@@ -1550,7 +1588,7 @@ ${pdfPageChunks.join("\n")}
           {[
             { label: "Total Runs", value: runs.length, color: "text-cyan-400" },
             { label: "Total Files", value: runs.reduce((s, r) => s + r.total_files, 0), color: "text-blue-400" },
-            { label: "Total Defects", value: runs.reduce((s, r) => s + runUniqueFindingsCount(r), 0), color: "text-red-400" },
+            { label: "Detections", value: runs.reduce((s, r) => s + runUniqueFindingsCount(r), 0), color: "text-red-400" },
             { label: "Needs Review", value: runs.reduce((s, r) => s + r.needs_review, 0), color: "text-amber-400" },
           ].map(s => (
             <div key={s.label} className="rounded-xl border border-[var(--dash-panel-border)] p-4 backdrop-blur-sm" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
@@ -1773,7 +1811,7 @@ ${pdfPageChunks.join("\n")}
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2.5 hover:bg-[var(--dash-hover-bg)] transition-all duration-150 shadow-lg right-[max(1rem,calc(380px+0.5rem))]"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2.5 hover:bg-[var(--dash-hover-bg)] transition-all duration-150 shadow-lg right-[max(1rem,calc(320px+0.5rem))]"
                 style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronRight size={20} />
@@ -2133,104 +2171,117 @@ ${pdfPageChunks.join("\n")}
                     onClick={e => e.stopPropagation()}
                   >
                     {previewFile ? (
-                      <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center">
-                        {previewRun.type !== "video" && (previewFile.annotated_url || runsPreviewThumbSrc) && (
+                      previewRun.type === "video" && previewFile.video_url ? (
+                        <VideoJobPreviewShell
+                          videoUrl={resolveThermalFetchUrl(previewFile.video_url.trim())}
+                          originalUrl={runsVideoOverlayUrls.originalUrl}
+                          framesUrl={runsVideoOverlayUrls.framesUrl}
+                          fps={previewFile.fps || 30}
+                          videoWidth={previewFile.video_width ?? undefined}
+                          videoHeight={previewFile.video_height ?? undefined}
+                          hiddenClassKeys={clsFilter.hiddenSet}
+                          videoRef={runsPreviewVideoRef}
+                          fullscreenHostRef={runsVideoFullscreenHostRef}
+                          zoom={previewModalZoom}
+                          setZoom={setPreviewModalZoom}
+                          panResetKey={`${previewRun.run_id}:${previewFileIdx}:v`}
+                          exitFullscreenDependency={`${previewRun.run_id}:${previewFileIdx}`}
+                          fileIndexLabel={`${previewFileIdx + 1} / ${completedFiles.length}`}
+                          onScrollAreaClick={(e) => e.stopPropagation()}
+                          shellExtraClassName="w-full"
+                          scrollAreaClassName="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto scrollbar-gutter-stable p-6 md:p-10"
+                          playerClassName="max-h-[min(80vh,calc(100vh-8rem))] w-full max-w-full rounded-2xl bg-black shadow-2xl"
+                        />
+                      ) : (
+                        <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center">
+                          {(previewFile.annotated_url || runsPreviewThumbSrc) && (
+                            <div
+                              className="absolute top-3 left-3 z-10 flex items-center gap-0.5 rounded-xl border border-[var(--dash-panel-border)] overflow-hidden shadow-lg"
+                              style={{ backgroundColor: "var(--dash-elevated-bg)" }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPreviewModalZoom((z) =>
+                                    Math.max(RGB_PREVIEW_ZOOM_MIN, z - RGB_PREVIEW_ZOOM_STEP)
+                                  )
+                                }
+                                className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                              >
+                                <ZoomOut size={15} />
+                              </button>
+                              <span className="px-2 text-xs dash-text-body min-w-[3.25rem] text-center font-medium tabular-nums">
+                                {Math.round(previewModalZoom * 100)}%
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPreviewModalZoom((z) =>
+                                    Math.min(RGB_PREVIEW_ZOOM_MAX, z + RGB_PREVIEW_ZOOM_STEP)
+                                  )
+                                }
+                                className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                              >
+                                <ZoomIn size={15} />
+                              </button>
+                              <div className="w-px h-5 bg-[var(--dash-panel-border)]" />
+                              <button
+                                type="button"
+                                onClick={() => setPreviewModalZoom(1)}
+                                className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
+                              >
+                                <RotateCcw size={13} />
+                              </button>
+                            </div>
+                          )}
+
                           <div
-                            className="absolute top-3 left-3 z-10 flex items-center gap-0.5 rounded-xl border border-[var(--dash-panel-border)] overflow-hidden shadow-lg"
+                            className="absolute top-3 right-3 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body font-medium tabular-nums shadow-sm"
                             style={{ backgroundColor: "var(--dash-elevated-bg)" }}
                           >
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setPreviewModalZoom((z) =>
-                                  Math.max(RGB_PREVIEW_ZOOM_MIN, z - RGB_PREVIEW_ZOOM_STEP)
-                                )
-                              }
-                              className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
-                            >
-                              <ZoomOut size={15} />
-                            </button>
-                            <span className="px-2 text-xs dash-text-body min-w-[3.25rem] text-center font-medium tabular-nums">
-                              {Math.round(previewModalZoom * 100)}%
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setPreviewModalZoom((z) =>
-                                  Math.min(RGB_PREVIEW_ZOOM_MAX, z + RGB_PREVIEW_ZOOM_STEP)
-                                )
-                              }
-                              className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
-                            >
-                              <ZoomIn size={15} />
-                            </button>
-                            <div className="w-px h-5 bg-[var(--dash-panel-border)]" />
-                            <button
-                              type="button"
-                              onClick={() => setPreviewModalZoom(1)}
-                              className="p-2 dash-text-primary hover:bg-[var(--dash-hover-bg)] transition-colors"
-                            >
-                              <RotateCcw size={13} />
-                            </button>
+                            {previewFileIdx + 1} / {completedFiles.length}
                           </div>
-                        )}
 
-                        <div
-                          className="absolute top-3 right-3 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body font-medium tabular-nums shadow-sm"
-                          style={{ backgroundColor: "var(--dash-elevated-bg)" }}
-                        >
-                          {previewFileIdx + 1} / {completedFiles.length}
-                        </div>
-
-                        {previewRun.type === "video" && previewFile.video_url ? (
-                          <video
-                            ref={runsPreviewVideoRef}
-                            key={previewFile.video_url}
-                            src={previewFile.video_url}
-                            controls
-                            autoPlay
-                            playsInline
-                            className="max-h-[min(80vh,calc(100vh-8rem))] w-full max-w-full rounded-2xl bg-black shadow-2xl"
-                          />
-                        ) : (previewFile.annotated_url || runsPreviewThumbSrc) ? (
-                          <div {...rgbPreviewPan}>
-                            <div
-                              className="relative mx-auto inline-block max-w-full rounded-2xl shadow-2xl transition-[transform] duration-150 ease-out"
-                              style={{ transform: `scale(${previewModalZoom})`, transformOrigin: "center" }}
-                            >
-                              {runsPreviewShowLiveOverlay ? (
-                                <>
+                          {(previewFile.annotated_url || runsPreviewThumbSrc) ? (
+                            <div {...rgbPreviewPan}>
+                              <div
+                                className="relative mx-auto inline-block max-w-full rounded-2xl shadow-2xl transition-[transform] duration-150 ease-out"
+                                style={{ transform: `scale(${previewModalZoom})`, transformOrigin: "center" }}
+                              >
+                                {runsPreviewShowLiveOverlay ? (
+                                  <>
+                                    <img
+                                      ref={runsPreviewImgRef}
+                                      src={runsPreviewBaseSrc}
+                                      alt={previewFile.filename}
+                                      className="w-full max-h-[80vh] rounded-2xl object-contain bg-black block"
+                                      draggable={false}
+                                    />
+                                    <canvas
+                                      ref={runsPreviewCanvasRef}
+                                      className="pointer-events-none absolute inset-0 h-full w-full rounded-2xl"
+                                      aria-hidden
+                                    />
+                                  </>
+                                ) : (
                                   <img
-                                    ref={runsPreviewImgRef}
-                                    src={runsPreviewBaseSrc}
+                                    src={runsPreviewAnnotatedSrc || runsPreviewThumbSrc}
                                     alt={previewFile.filename}
-                                    className="w-full max-h-[80vh] rounded-2xl object-contain bg-black block"
-                                    draggable={false}
+                                    className="w-full max-h-[80vh] rounded-2xl object-contain bg-black"
                                   />
-                                  <canvas
-                                    ref={runsPreviewCanvasRef}
-                                    className="pointer-events-none absolute inset-0 h-full w-full rounded-2xl"
-                                    aria-hidden
-                                  />
-                                </>
-                              ) : (
-                                <img
-                                  src={runsPreviewAnnotatedSrc || runsPreviewThumbSrc}
-                                  alt={previewFile.filename}
-                                  className="w-full max-h-[80vh] rounded-2xl object-contain bg-black"
-                                />
-                              )}
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ) : (
-                          <div
-                            className="mx-auto flex aspect-video w-full max-w-3xl items-center justify-center rounded-2xl dash-text-subtle text-sm"
-                            style={{ backgroundColor: "var(--dash-nested-bg)" }}
-                          >
-                            No preview available
-                          </div>
-                        )}
-                      </div>
+                          ) : (
+                            <div
+                              className="mx-auto flex aspect-video w-full max-w-3xl items-center justify-center rounded-2xl dash-text-subtle text-sm"
+                              style={{ backgroundColor: "var(--dash-nested-bg)" }}
+                            >
+                              No preview available
+                            </div>
+                          )}
+                        </div>
+                      )
                     ) : (
                       <div className="text-base dash-text-subtle">No completed files to preview</div>
                     )}
@@ -2238,73 +2289,76 @@ ${pdfPageChunks.join("\n")}
 
                   {previewRun.type === "video" && previewFile?.video_url && (
                     <VideoAnnotatedFrameStrip
-                      videoUrl={previewFile.video_url}
+                      videoUrl={resolveThermalFetchUrl(previewFile.video_url.trim())}
                       duration={previewFile.duration || 0}
                       fps={previewFile.fps || 0}
                       framesAnalyzed={previewFile.frames_analyzed || 0}
                       mainVideoRef={runsPreviewVideoRef}
+                      framesUrl={runsVideoOverlayUrls.framesUrl}
+                      hiddenClassKeys={clsFilter.hiddenSet}
                     />
                   )}
                 </>
               )}
             </div>
 
-            {/* RIGHT — Stats & details */}
+            {/* RIGHT — Stats & details (match Video Upload preview sidebar) */}
             <div
-              className="flex h-full min-h-0 w-[380px] shrink-0 flex-col overflow-hidden border-l border-dash dash-modal-aside"
+              className="flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-hidden border-l border-[var(--dash-panel-border)]"
+              style={{ backgroundColor: "var(--dash-modal-aside)" }}
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex shrink-0 items-stretch border-b border-dash">
+              <div className="flex shrink-0 items-stretch border-b border-[var(--dash-panel-border)]">
                 <div className="flex min-w-0 flex-1 items-center px-3 py-2.5">
                   <span className="text-[10px] font-bold uppercase tracking-widest dash-text-subtle">Run</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => closePreview()}
-                  className="flex shrink-0 items-center justify-center px-3 border-l border-dash hover:bg-[var(--dash-hover-bg)] transition-colors"
+                  className="flex shrink-0 items-center justify-center px-3 border-l border-[var(--dash-panel-border)] hover:bg-[var(--dash-hover-bg)] transition-colors"
                   aria-label="Close preview"
                 >
                   <X size={18} className="dash-text-subtle" />
                 </button>
               </div>
-              <div className="shrink-0 p-4 border-b border-dash">
-                <div className="flex items-center gap-2 mb-2.5">
-                  <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border tracking-wide ${
+              <div className="shrink-0 p-4 border-b border-[var(--dash-panel-border)]">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
                     runDisplayType(previewRun) === "image"
-                      ? "bg-blue-500/15 text-blue-300 border-blue-500/30"
+                      ? "bg-blue-500/20 text-blue-300 border-blue-500/50"
                       : runDisplayType(previewRun) === "thermal"
-                        ? "bg-orange-500/15 text-orange-300 border-orange-500/30"
-                        : "bg-purple-500/15 text-purple-300 border-purple-500/30"
+                        ? "bg-orange-500/20 text-orange-300 border-orange-500/50"
+                        : "bg-purple-500/20 text-purple-300 border-purple-500/50"
                   }`}>
                     {runDisplayType(previewRun).toUpperCase()}
                   </span>
-                  <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border tracking-wide ${
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
                     isRunBatchComplete(previewRun.status)
-                      ? "bg-green-500/15 text-green-300 border-green-500/30"
-                      : "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                      ? "bg-green-500/20 text-green-300 border-green-500/50"
+                      : "bg-amber-500/20 text-amber-300 border-amber-500/50"
                   }`}>
                     {isRunBatchComplete(previewRun.status) ? "COMPLETE" : "PROCESSING"}
                   </span>
                 </div>
-                <div className="text-xs font-mono dash-text-muted truncate" title={previewRun.run_id}>
-                  {previewRun.run_id}
+                <div className="text-sm font-Poppins dash-text-muted truncate" title={previewRun.run_id}>
+                  ID: {previewRun.run_id}
                 </div>
-                <div className="text-[11px] dash-text-subtle mt-1">{timeAgo(previewRun.created_at)}</div>
+                <div className="text-xs dash-text-subtle mt-1">{timeAgo(previewRun.created_at)}</div>
               </div>
 
-              <div className="shrink-0 p-4 border-b border-dash">
-                <div className="dash-nested rounded-lg p-3 min-w-0 text-center">
+              <div className="shrink-0 p-4 border-b border-[var(--dash-panel-border)] text-center">
+                <div className="rounded-lg border border-[var(--dash-panel-border)] p-3 min-w-0" style={{ backgroundColor: "var(--dash-inset-bg)" }}>
                     <div className="text-xs dash-text-muted font-medium uppercase tracking-wide mb-1">Detections</div>
                     {previewFile != null && previewRun ? (
                       previewRun.type === "video" &&
                       previewDetectionRows.length === 0 &&
                       (previewFile.total_detections || 0) > 0 &&
                       videoDetectionsLoading ? (
-                        <div className="text-sm font-bold dash-text-subtle mt-0.5">…</div>
+                        <div className="mt-0.5 text-sm font-bold dash-text-subtle">Loading…</div>
                       ) : previewSidebarPartition ? (
                         <div
                           className={`mt-0.5 flex flex-wrap items-center justify-center gap-x-4 text-sm font-semibold leading-snug ${
-                            previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-emerald-400"
+                            previewSidebarPartition.defects.length > 0 ? "text-red-400" : "text-green-400"
                           }`}
                         >
                           <span>{previewSidebarPartition.components.length} components</span>
@@ -2324,12 +2378,12 @@ ${pdfPageChunks.join("\n")}
               </div>
 
               {previewFile && (
-                <div className="shrink-0 p-4 border-b border-dash">
-                  <div className="flex items-start justify-between gap-2 mb-3">
+                <div className="shrink-0 p-4 border-b border-[var(--dash-panel-border)]">
+                  <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="text-[10px] font-medium dash-text-muted uppercase tracking-wide mb-1">Current File</div>
+                      <div className="text-xs dash-text-muted mb-2">Current File</div>
                       <div
-                        className="text-sm dash-text-primary truncate font-semibold leading-snug"
+                        className="text-sm dash-text-primary truncate font-medium leading-snug"
                         title={previewFile.filename}
                       >
                         {previewFile.filename}
@@ -2345,13 +2399,17 @@ ${pdfPageChunks.join("\n")}
                         toggleKey={clsFilter.toggleKey}
                         showAll={clsFilter.showAll}
                         hideAll={clsFilter.hideAll}
-                        liveOverlayEnabled={runsPreviewShowLiveOverlay}
+                        liveOverlayEnabled={
+                          runsPreviewShowLiveOverlay ||
+                          (previewRun.type === "video" &&
+                            Boolean(runsVideoOverlayUrls.originalUrl && runsVideoOverlayUrls.framesUrl))
+                        }
                       />
                     )}
                   </div>
 
                   {previewRun.type !== "video" && previewFile.stats && (
-                    <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center justify-between text-xs mt-3">
                       <span className="dash-text-muted">Processing time</span>
                       <span className="dash-text-primary font-semibold tabular-nums">
                         {previewFile.stats.processing_time_ms}ms
@@ -2360,33 +2418,33 @@ ${pdfPageChunks.join("\n")}
                   )}
 
                   {previewRun.type === "video" && (
-                    <div className="space-y-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="dash-text-muted">Duration</span>
-                        <span className="dash-text-primary font-semibold tabular-nums">{formatDuration(previewFile.duration || 0)}</span>
+                    <div className="mt-3 space-y-2 text-xs">
+                      <div className="flex justify-between dash-text-body">
+                        <span>Duration</span>
+                        <span className="dash-text-primary font-semibold">{formatDuration(previewFile.duration || 0)}</span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="dash-text-muted">FPS</span>
-                        <span className="dash-text-primary font-semibold tabular-nums">{previewFile.fps || 0}</span>
+                      <div className="flex justify-between dash-text-body">
+                        <span>FPS</span>
+                        <span className="dash-text-primary font-semibold">{previewFile.fps || 0}</span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="dash-text-muted">Frames analyzed</span>
-                        <span className="dash-text-primary font-semibold tabular-nums">{previewFile.frames_analyzed || 0}</span>
+                      <div className="flex justify-between dash-text-body">
+                        <span>Frames Analyzed</span>
+                        <span className="dash-text-primary font-semibold">{previewFile.frames_analyzed || 0}</span>
                       </div>
                     </div>
                   )}
                 </div>
               )}
 
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                {previewRun.type === "video" &&
-                  previewFile &&
-                  videoDetectionsLoading &&
-                  previewDetectionRows.length === 0 &&
-                  (previewFile.total_detections || 0) > 0 && (
-                    <div className="p-4 text-xs dash-text-subtle">Loading defect list…</div>
-                  )}
+              {previewRun.type === "video" &&
+                previewFile &&
+                videoDetectionsLoading &&
+                previewDetectionRows.length === 0 &&
+                (previewFile.total_detections || 0) > 0 && (
+                  <div className="shrink-0 border-b border-[var(--dash-panel-border)] p-4 text-xs dash-text-subtle">Loading defect list…</div>
+                )}
 
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 {previewFile && previewSidebarPartition &&
                   (previewSidebarPartition.components.length > 0 || previewSidebarPartition.defects.length > 0) && (
                     <div className="overflow-hidden rounded-lg border border-dash">

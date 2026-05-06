@@ -5,7 +5,6 @@ export const SIDEBAR_COMPONENT_CLASS_KEYS = [
   "bolted_connection",
   "conductor",
   "vibration_damper",
-  "foreign_object",
   "suspension_clamp",
   "yoke_plate",
   "transmission_corridor",

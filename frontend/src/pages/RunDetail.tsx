@@ -79,7 +79,12 @@ function loadGalleryState(runIdOrParam: string): { severity: string; search: str
     return {
       severity: typeof o.severity === "string" ? o.severity : "",
       search: typeof o.search === "string" ? o.search : "",
-      zoom: typeof o.zoom === "number" && o.zoom >= 0.25 && o.zoom <= 3 ? o.zoom : 1,
+      zoom:
+        typeof o.zoom === "number" &&
+        o.zoom >= RGB_PREVIEW_ZOOM_MIN &&
+        o.zoom <= RGB_PREVIEW_ZOOM_MAX
+          ? o.zoom
+          : 1,
     };
   } catch {
     return null;

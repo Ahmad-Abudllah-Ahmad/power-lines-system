@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
 import { VideoAnnotatedFrameStrip } from "../components/VideoAnnotatedFrameStrip";
+import { VideoJobPreviewShell } from "../components/VideoJobPreviewShell";
 import { DetectionSidebarBucketPanels } from "../components/DetectionSidebarBucketPanels";
 import {
   partitionDetectionsSidebarBuckets,
@@ -45,6 +46,12 @@ type VideoCard = {
   progressLabel: string;
   thumbUrl?: string;
   videoUrl?: string;
+  /** Un-annotated video, used by the class-filter overlay player when available. */
+  originalUrl?: string;
+  /** /results/<file_id>/detections_frames.json — list[frame] -> list[{bbox, class_name, ...}]. */
+  framesUrl?: string;
+  videoWidth?: number;
+  videoHeight?: number;
   totalDetections: number;
   framesAnalyzed: number;
   duration: number;
@@ -64,6 +71,48 @@ type LocalVideo = {
 
 let _vid = 0;
 const uid = () => `v_${++_vid}_${Date.now()}`;
+
+const VIDEO_STATE_STORAGE_KEY = "azeri-video-state-v1";
+
+type PersistedVideoState = {
+  cards: [string, VideoCard][];
+  jobId: string | null;
+  jobCreatedAt: number | null;
+  previewId: string | null;
+  batchProgress: { completed: number; total: number };
+  nameMap: [string, string][];
+};
+
+function loadPersistedVideoState(): PersistedVideoState | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(VIDEO_STATE_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.cards)) return null;
+    return data as PersistedVideoState;
+  } catch {
+    return null;
+  }
+}
+
+function persistVideoState(state: PersistedVideoState) {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(VIDEO_STATE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota / privacy mode — best-effort only */
+  }
+}
+
+function clearPersistedVideoState() {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(VIDEO_STATE_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 function videoResultsFolderId(c: Pick<VideoCard, "fileId" | "videoUrl">): string | null {
   if (c.fileId) return c.fileId;
@@ -89,13 +138,27 @@ export type VideoUploadProps = { embedded?: boolean };
 
 export default function VideoUpload({ embedded = false }: VideoUploadProps) {
   const [localVideos, setLocalVideos] = useState<LocalVideo[]>([]);
-  const [cards, setCards] = useState<Map<string, VideoCard>>(new Map());
-  const [jobId, setJobId] = useState<string | null>(null);
+  // Hydrate persisted UI state synchronously so a server restart + page reload
+  // restores completed video cards, preview selection, batch progress and job id.
+  const _persistedOnMount = useMemo(() => loadPersistedVideoState(), []);
+  const [cards, setCards] = useState<Map<string, VideoCard>>(
+    () => new Map(_persistedOnMount?.cards ?? [])
+  );
+  const [jobId, setJobId] = useState<string | null>(_persistedOnMount?.jobId ?? null);
   const [processing, setProcessing] = useState(false);
-  const [batchProgress, setBatchProgress] = useState({ completed: 0, total: 0 });
-  const [config, setConfig] = useState({ confidence: 0.20, sliceSize: 1280, overlap: 0.25, frameInterval: 1 });
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const [jobCreatedAt, setJobCreatedAt] = useState<number | null>(null);
+  const [batchProgress, setBatchProgress] = useState(
+    _persistedOnMount?.batchProgress ?? { completed: 0, total: 0 }
+  );
+  const [config, setConfig] = useState({
+    confidence: 0.25,
+    sliceSize: 1280,
+    overlap: 0.25,
+    frameInterval: 1,
+    fullImgsz: 1280,
+  });
+  const [previewId, setPreviewId] = useState<string | null>(_persistedOnMount?.previewId ?? null);
+  const [previewVideoZoom, setPreviewVideoZoom] = useState(1);
+  const [jobCreatedAt, setJobCreatedAt] = useState<number | null>(_persistedOnMount?.jobCreatedAt ?? null);
   const [videoFetchedDetections, setVideoFetchedDetections] = useState<any[]>([]);
   const [videoDetectionsLoading, setVideoDetectionsLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -113,9 +176,10 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
   const socketRef = useRef<Socket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const jobIdRef = useRef<string | null>(null);
-  const nameToKeyRef = useRef<Map<string, string>>(new Map());
+  const nameToKeyRef = useRef<Map<string, string>>(new Map(_persistedOnMount?.nameMap ?? []));
   const cancelRequestedRef = useRef(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewVideoFullscreenHostRef = useRef<HTMLDivElement | null>(null);
 
   const totalVideos = localVideos.length;
   const canStart = totalVideos > 0 && !processing;
@@ -127,6 +191,23 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
+
+  // Mirror UI state to localStorage so a backend restart + page reload still
+  // shows the same completed videos, preview selection and job context.
+  useEffect(() => {
+    if (cards.size === 0 && !jobId && !previewId) {
+      clearPersistedVideoState();
+      return;
+    }
+    persistVideoState({
+      cards: Array.from(cards.entries()),
+      jobId,
+      jobCreatedAt,
+      previewId,
+      batchProgress,
+      nameMap: Array.from(nameToKeyRef.current.entries()),
+    });
+  }, [cards, jobId, jobCreatedAt, previewId, batchProgress]);
 
   useEffect(() => {
     fetch("/api/models")
@@ -223,12 +304,14 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
     setCards(new Map());
     setJobId(null);
     setJobCreatedAt(null);
+    setPreviewId(null);
     setBatchProgress({ completed: 0, total: 0 });
     setProcessing(false);
     socketRef.current?.disconnect();
     socketRef.current = null;
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     nameToKeyRef.current.clear();
+    clearPersistedVideoState();
   }, [localVideos]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -280,6 +363,10 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
               progressLabel: "Complete",
               thumbUrl: r.thumb_url,
               videoUrl: r.video_url,
+              originalUrl: r.original_url ?? existing?.originalUrl,
+              framesUrl: r.frames_url ?? existing?.framesUrl,
+              videoWidth: r.video_width ?? existing?.videoWidth,
+              videoHeight: r.video_height ?? existing?.videoHeight,
               totalDetections: r.total_detections || 0,
               framesAnalyzed: r.frames_analyzed || 0,
               duration: r.duration || 0,
@@ -343,6 +430,10 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
           updateCard(key, {
             fileId: d.file_id, status: "complete", progress: 100, progressLabel: "Complete",
             thumbUrl: d.thumb_url, videoUrl: d.video_url,
+            originalUrl: d.original_url,
+            framesUrl: d.frames_url,
+            videoWidth: d.video_width,
+            videoHeight: d.video_height,
             totalDetections: d.total_detections || 0,
             framesAnalyzed: d.frames_analyzed || 0,
             duration: d.duration || 0, fps: d.fps || 0,
@@ -398,6 +489,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
           det_confidence: config.confidence,
           det_slice_size: config.sliceSize,
           det_overlap: config.overlap,
+          det_full_imgsz: config.fullImgsz,
           frame_interval: config.frameInterval,
           model_id: selectedModel || undefined,
         }),
@@ -482,9 +574,29 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
   }, [completedCards, previewId]);
 
   useEffect(() => {
+    setPreviewVideoZoom(1);
+  }, [previewId]);
+
+  useEffect(() => {
+    if (previewId) return;
+    const doc = document as Document & {
+      webkitExitFullscreen?: () => Promise<void>;
+      webkitFullscreenElement?: Element | null;
+    };
+    const fs = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+    if (fs) void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.());
+  }, [previewId]);
+
+  useEffect(() => {
     if (!previewId) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPreviewId(null);
+      if (e.key === "Escape") {
+        const host = previewVideoFullscreenHostRef.current;
+        const doc = document as Document & { webkitFullscreenElement?: Element | null };
+        const fs = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+        if (host && fs === host) return;
+        setPreviewId(null);
+      }
       if (e.key === "ArrowLeft") navigatePreview(-1);
       if (e.key === "ArrowRight") navigatePreview(1);
     };
@@ -553,6 +665,8 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
 
   const clsFilter = useDetectionClassFilterForRows(previewDetectionRows as DetectionRowLike[], previewId);
 
+  // Sidebar lists all model classes (components / defects). The class filter only affects
+  // what is drawn on the video overlay, not which labels appear here.
   const previewSidebarPartition = useMemo(() => {
     if (!previewDetectionRows.length) return null;
     return partitionDetectionsSidebarBuckets(previewDetectionRows);
@@ -943,30 +1057,41 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
 
           {/* Video | annotated frame strip | stats (same row as your mock) */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-row items-stretch pt-14 pb-0">
-            <div
-              className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-4 md:p-8"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="relative w-full max-w-5xl">
-                <div className="absolute top-2 right-2 z-10 rounded-lg border border-[var(--dash-panel-border)] px-3 py-1.5 text-xs dash-text-body" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
-                  {previewIndex + 1} / {completedCards.length}
-                </div>
-                {previewCard.videoUrl ? (
-                  <video
-                    ref={previewVideoRef}
-                    key={previewCard.videoUrl}
-                    src={previewCard.videoUrl}
-                    controls
-                    autoPlay
-                    playsInline
-                    className="w-full max-h-[calc(100vh-8rem)] rounded-xl bg-black shadow-2xl"
-                  />
-                ) : (
-                  <div className="flex aspect-video w-full items-center justify-center rounded-xl dash-text-subtle" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
-                    Video not available
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              {previewCard.videoUrl ? (
+                <VideoJobPreviewShell
+                  videoUrl={previewCard.videoUrl}
+                  originalUrl={previewCard.originalUrl}
+                  framesUrl={previewCard.framesUrl}
+                  fps={previewCard.fps}
+                  videoWidth={previewCard.videoWidth}
+                  videoHeight={previewCard.videoHeight}
+                  hiddenClassKeys={clsFilter.hiddenSet}
+                  videoRef={previewVideoRef}
+                  fullscreenHostRef={previewVideoFullscreenHostRef}
+                  zoom={previewVideoZoom}
+                  setZoom={setPreviewVideoZoom}
+                  panResetKey={previewId ? `${previewId}:v` : null}
+                  exitFullscreenDependency={previewId ?? ""}
+                  fileIndexLabel={`${previewIndex + 1} / ${completedCards.length}`}
+                  onScrollAreaClick={(e) => e.stopPropagation()}
+                  toolbarClassName="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-[var(--dash-panel-border)]"
+                  scrollAreaClassName="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-4 md:p-8"
+                  toolbarIconSize={16}
+                  playerClassName="max-h-[min(85vh,820px)] w-full max-w-full rounded-xl border border-[var(--dash-preview-border)] bg-black shadow-lg"
+                />
+              ) : (
+                <div
+                  className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-4 md:p-8"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="relative w-full max-w-5xl">
+                    <div className="flex aspect-video w-full items-center justify-center rounded-xl dash-text-subtle" style={{ backgroundColor: "var(--dash-nested-bg)" }}>
+                      Video not available
+                    </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {previewCard.videoUrl && (
@@ -976,6 +1101,8 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
                 fps={previewCard.fps}
                 framesAnalyzed={previewCard.framesAnalyzed}
                 mainVideoRef={previewVideoRef}
+                framesUrl={previewCard.framesUrl}
+                hiddenClassKeys={clsFilter.hiddenSet}
               />
             )}
           </div>
