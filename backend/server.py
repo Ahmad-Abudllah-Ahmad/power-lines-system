@@ -46,34 +46,35 @@ import uvicorn
 # ---------------------------------------------------------------------------
 # Paths & constants
 # ---------------------------------------------------------------------------
-# Local mirror of RunPod training output (canonical pod path documented in description).
-_DOTA_WEIGHTS_FILE = (
-    _DETECTION_SERVER_DIR
-    / "models"
-    / "yolo11x_obb_dota_20260426_060214"
-    / "weights"
-    / "best.pt"
+# Remote inference: weights live on the RunPod pod (no local download).
+# The pod runs scripts/pod_inference_server.py on port 6006 (exposed via runpod proxy).
+# Default host must match the pod "HTTP Service" URL for port 6006 (see RunPod Connect).
+POD_INFERENCE_URL = os.environ.get(
+    "POD_INFERENCE_URL",
+    "https://ycfjp6tp0zl9xf-64410b2b-6006.proxy.runpod.net",
+).rstrip("/")
+POD_REMOTE_WEIGHTS = (
+    "/workspace/project/runs/obb/yolo11x_obb_dota_20260426_060214/weights/best.pt"
 )
 
 AVAILABLE_MODELS: dict[str, dict] = {
     "dota_1000ep_best": {
         "id": "dota_1000ep_best",
         "title": "DOTA 1000ep · YOLO11x OBB (RunPod H200)",
-        "path": str(_DOTA_WEIGHTS_FILE),
-        "description": (
-            "Pod weights path: /workspace/project/runs/obb/yolo11x_obb_dota_20260426_060214/weights/best.pt"
-        ),
+        "path": POD_REMOTE_WEIGHTS,
+        "description": f"YOLO inference on RunPod GPU · {POD_INFERENCE_URL}",
     },
 }
 
-WEIGHTS_PATH = Path(AVAILABLE_MODELS["dota_1000ep_best"]["path"])
+WEIGHTS_PATH = Path(POD_REMOTE_WEIGHTS)
 RESULTS_DIR = Path(__file__).parent / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
 # HTTP listen port (override when 8000 is already in use, e.g. `set PORT=8001`)
 SERVER_PORT = int(os.environ.get("PORT", "8001"))
 
-GPU_BATCH = 32          # frames per YOLO batch on CUDA (lower if CUDA OOM; uses FP16 when USE_HALF)
+# Larger batches = fewer HTTP round-trips to RunPod (major latency win for remote YOLO).
+GPU_BATCH = int(os.environ.get("GPU_BATCH", "56"))
 READ_AHEAD = 128        # decode-ahead queue so GPU batches stay full during video
 ANNOTATE_THREADS = 4    # CPU threads for drawing bboxes
 
@@ -81,25 +82,24 @@ ANNOTATE_THREADS = 4    # CPU threads for drawing bboxes
 # GPU detection & CUDA setup
 # ---------------------------------------------------------------------------
 def _select_device() -> str:
-    import torch
-    if torch.cuda.is_available():
-        torch.cuda.init()
-        name = torch.cuda.get_device_name(0)
-        vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        print(f"[GPU] {name} | {vram:.1f} GB VRAM | CUDA {torch.version.cuda}")
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        try:
-            torch.set_float32_matmul_precision("high")
-        except Exception:
-            pass
-        return "0"
-    print("[WARN] CUDA not available, using CPU")
+    """Local device selection. With RemoteYOLO inference happens on the pod (always GPU);
+    the local 'device' flag only controls whether we ask the pod to run in FP16."""
+    try:
+        import torch  # noqa: F401
+        if torch.cuda.is_available():
+            torch.cuda.init()
+            name = torch.cuda.get_device_name(0)
+            vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            print(f"[GPU-local] {name} | {vram:.1f} GB VRAM | CUDA {torch.version.cuda}")
+            return "0"
+    except Exception as e:
+        print(f"[INFO] Local torch unavailable ({e}); inference runs entirely on RunPod.")
+    print("[INFO] Using CPU locally (remote inference on pod still uses GPU).")
     return "cpu"
 
 DEVICE = _select_device()
-USE_HALF = DEVICE != "cpu"
+# Pod has H200 GPU — always request FP16 from the remote model.
+USE_HALF = True
 
 
 def _yolo_predict_kw() -> dict:
@@ -145,21 +145,183 @@ _sahi_det_model = None
 _sahi_lock = threading.Lock()
 
 
+class _TensorList(list):
+    """list with a .tolist() method so call sites doing `box.xyxy[0].tolist()` work."""
+    def tolist(self):
+        return list(self)
+
+
+class _RemoteBox:
+    """Mimics ultralytics box[i] interface: .cls/.xyxy/.conf are tensor-like with [0]."""
+    __slots__ = ("cls", "xyxy", "conf")
+
+    def __init__(self, cls_id: int, xyxy: list[float], conf: float):
+        self.cls = (cls_id,)
+        self.xyxy = (_TensorList(xyxy),)
+        self.conf = (conf,)
+
+
+class _RemoteBoxes:
+    """Iterable + len() over a list of _RemoteBox; mirrors ultralytics result.boxes."""
+    __slots__ = ("_boxes",)
+
+    def __init__(self, boxes: list[_RemoteBox]):
+        self._boxes = boxes
+
+    def __iter__(self):
+        return iter(self._boxes)
+
+    def __len__(self):
+        return len(self._boxes)
+
+
+class _RemoteResult:
+    """Mimics ultralytics result with `.boxes`."""
+    __slots__ = ("boxes",)
+
+    def __init__(self, boxes: _RemoteBoxes):
+        self.boxes = boxes
+
+
+class RemoteYOLO:
+    """Tiny shim that proxies `.predict(...)` to the RunPod pod's HTTP inference server.
+
+    Returns objects that quack like Ultralytics results so the rest of `server.py`
+    (run_sahi_detection / _batch_detect) keeps working unchanged.
+    """
+
+    def __init__(self, endpoint_url: str, weights_path: str = ""):
+        import requests
+        from requests.adapters import HTTPAdapter
+        self._requests = requests
+        self.endpoint = endpoint_url.rstrip("/")
+        self.weights_path = weights_path
+        self.names = self._fetch_names()
+        # Bigger connection pool so parallel chunk uploads don't queue.
+        self._session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=0)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
+        # Worker pool for fan-out chunked uploads (env-tunable).
+        max_workers = max(1, int(os.environ.get("REMOTE_PREDICT_PARALLEL", "4")))
+        self._chunk_pool = ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="podchunk"
+        )
+
+    def _fetch_names(self) -> dict:
+        try:
+            r = self._requests.get(f"{self.endpoint}/names", timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            return {int(k): str(v) for k, v in data.items()}
+        except Exception as e:
+            print(f"[WARN] Could not fetch class names from {self.endpoint}: {e}")
+            return {}
+
+    def to(self, _device):
+        return self
+
+    def predict(self, source, conf: float = 0.20, imgsz: int = 1280,
+                device=None, verbose: bool = False, half: bool = False, **_kw):
+        # Normalize input to a list of np.ndarray (BGR) and JPEG-encode once
+        imgs = source if isinstance(source, (list, tuple)) else [source]
+        encoded: list[bytes] = []
+        for img in imgs:
+            if not isinstance(img, np.ndarray):
+                raise TypeError(f"RemoteYOLO.predict expects numpy arrays, got {type(img)}")
+            ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 78])
+            if not ok:
+                raise RuntimeError("JPEG encode failed for remote inference")
+            encoded.append(buf.tobytes())
+
+        data_form = {"conf": str(conf), "imgsz": str(imgsz), "half": "1" if half else "0"}
+
+        # The RunPod HTTPS proxy (Cloudflare-fronted) is unreliable for large
+        # multipart bodies — big requests randomly fail with 502/524 even though
+        # the pod itself is idle. We split the request into proxy-friendly chunks
+        # and merge results. Detection / model behavior is unchanged: each chunk
+        # uses the exact same conf/imgsz/half on the same model.
+        CHUNK = max(1, int(os.environ.get("REMOTE_PREDICT_CHUNK", "10")))
+
+        # Build chunk index list and POST chunks in parallel — the pod GPU can
+        # service overlapping requests, and parallel uploads hide the proxy
+        # round-trip behind GPU work for the next chunk. Order is preserved by
+        # index so results are merged in the same order as `imgs`.
+        chunk_starts = list(range(0, len(encoded), CHUNK))
+        chunk_results: list[list[list[dict]]] = [[] for _ in chunk_starts]
+
+        def _do_chunk(idx: int, ci: int):
+            chunk_bytes = encoded[ci : ci + CHUNK]
+            body = self._post_chunk_with_retry(chunk_bytes, data_form, ci)
+            chunk_results[idx] = body.get("detections") or []
+
+        if len(chunk_starts) <= 1:
+            for idx, ci in enumerate(chunk_starts):
+                _do_chunk(idx, ci)
+        else:
+            futs = [
+                self._chunk_pool.submit(_do_chunk, idx, ci)
+                for idx, ci in enumerate(chunk_starts)
+            ]
+            for f in futs:
+                f.result()  # propagate exceptions
+
+        all_per_image: list[list[dict]] = []
+        for per_chunk in chunk_results:
+            all_per_image.extend(per_chunk)
+
+        results: list[_RemoteResult] = []
+        for dets in all_per_image:
+            boxes = [_RemoteBox(int(d["cls"]), list(d["xyxy"]), float(d["conf"])) for d in dets]
+            results.append(_RemoteResult(_RemoteBoxes(boxes)))
+        while len(results) < len(imgs):
+            results.append(_RemoteResult(_RemoteBoxes([])))
+        return results
+
+    def _post_chunk_with_retry(self, chunk_bytes: list[bytes], data_form: dict, base_idx: int) -> dict:
+        """POST one chunk to /predict with retries on transient proxy errors.
+
+        Retries cover Cloudflare-style transient statuses (502/503/504/520-524)
+        as well as connection / read timeouts. Idempotent: same payload, same
+        params — pure transport-layer resiliency.
+        """
+        TRANSIENT_STATUSES = {408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+        max_attempts = max(1, int(os.environ.get("REMOTE_PREDICT_RETRIES", "8")))
+        last_err: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                files = [
+                    ("files", (f"img_{base_idx + i}.jpg", b, "image/jpeg"))
+                    for i, b in enumerate(chunk_bytes)
+                ]
+                r = self._session.post(
+                    f"{self.endpoint}/predict",
+                    files=files, data=data_form, timeout=(15, 75),  # (connect, read)
+                )
+                if r.status_code in TRANSIENT_STATUSES:
+                    raise RuntimeError(f"transient {r.status_code} from pod proxy")
+                r.raise_for_status()
+                return r.json()
+            except (self._requests.exceptions.Timeout,
+                    self._requests.exceptions.ConnectionError) as e:
+                last_err = e
+            except Exception as e:
+                if ("transient" not in str(e)
+                        and not isinstance(e, self._requests.exceptions.RequestException)):
+                    raise
+                last_err = e
+            if attempt < max_attempts:
+                wait = min(2 ** min(attempt, 4), 12)  # 2, 4, 8, 12, 12, 12, ...
+                print(f"[WARN] pod /predict chunk@{base_idx} attempt {attempt} failed ({last_err}); retrying in {wait}s")
+                time.sleep(wait)
+        raise RuntimeError(f"pod /predict chunk@{base_idx} failed after {max_attempts} attempts: {last_err}")
+
+
 def _load_model(weights_path: str):
-    """Load a YOLO model, pin to GPU, and warmup."""
-    from ultralytics import YOLO
-    import torch
-    print(f"[INFO] Loading YOLO model from {weights_path} ...")
-    model = YOLO(weights_path)
-    if DEVICE != "cpu":
-        dev = torch.device(f"cuda:{DEVICE}")
-        model.to(dev)
-        dummy = [np.zeros((640, 640, 3), dtype=np.uint8)] * 4
-        model.predict(dummy, imgsz=640, device=DEVICE, verbose=False, **_yolo_predict_kw())
-        torch.cuda.synchronize()
-        vram_used = torch.cuda.memory_allocated(0) / (1024**3)
-        print(f"[GPU] Model pinned + warmed up | VRAM: {vram_used:.2f} GB")
-    print(f"[INFO] Model loaded. {len(model.names)} classes")
+    """Connect to the RunPod inference server and return a RemoteYOLO shim."""
+    print(f"[INFO] Connecting to remote YOLO at {POD_INFERENCE_URL} (weights={weights_path}) ...")
+    model = RemoteYOLO(POD_INFERENCE_URL, weights_path=weights_path)
+    print(f"[INFO] Remote model ready. {len(model.names)} classes")
     return model
 
 
@@ -173,7 +335,7 @@ def get_model():
 
 
 def switch_model(model_id: str):
-    """Switch the active YOLO model. Clears caches so next call loads the new weights."""
+    """Switch the active model. With RemoteYOLO the only side effect is bumping the path label."""
     global _model, _sahi_det_model, _model_path, WEIGHTS_PATH
     info = AVAILABLE_MODELS.get(model_id)
     if not info:
@@ -182,32 +344,15 @@ def switch_model(model_id: str):
         with _sahi_lock:
             _model_path = info["path"]
             WEIGHTS_PATH = Path(_model_path)
-            if _model is not None:
-                del _model
             _model = None
             _sahi_det_model = None
-            if DEVICE != "cpu":
-                import torch
-                torch.cuda.empty_cache()
     print(f"[INFO] Switched active model to {model_id} ({info['title']})")
 
 
-def get_sahi_model(confidence: float = 0.25):
-    """Cached SAHI AutoDetectionModel wrapper — avoids re-creating every call."""
-    global _sahi_det_model
-    sahi_device = f"cuda:{DEVICE}" if DEVICE != "cpu" else "cpu"
-    if _sahi_det_model is None or abs(_sahi_det_model._confidence - confidence) > 0.001:
-        with _sahi_lock:
-            from sahi import AutoDetectionModel
-            model = get_model()
-            _sahi_det_model = AutoDetectionModel.from_pretrained(
-                model_type="ultralytics",
-                model=model,
-                confidence_threshold=confidence,
-                device=sahi_device,
-            )
-            _sahi_det_model._confidence = confidence
-    return _sahi_det_model
+def get_sahi_model(confidence: float = 0.20):
+    """Kept for API compatibility — returns the RemoteYOLO shim (the slicing logic in
+    `run_sahi_detection` calls `model.predict(...)` directly, no SAHI runtime needed)."""
+    return get_model()
 
 
 # ---------------------------------------------------------------------------
@@ -222,8 +367,8 @@ def _new_job(
     slice_size: int,
     overlap: float,
     source: str = "rgb",
+    nms_iou: float = 0.10,
     full_imgsz: int = 1280,
-    nms_iou: float = 0.5,
     sahi_tiled: bool = True,
 ) -> dict:
     job_id = uuid.uuid4().hex[:12]
@@ -233,8 +378,8 @@ def _new_job(
         "confidence": confidence,
         "slice_size": slice_size,
         "overlap": overlap,
-        "full_imgsz": full_imgsz,
         "nms_iou": nms_iou,
+        "full_imgsz": full_imgsz,
         "sahi_tiled": sahi_tiled,
         "source": source,
         "files": {},          # file_id -> {filename, status, ...}
@@ -257,33 +402,23 @@ def _gps_for_map(job: dict, jid: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Ultralytics result parsing (detect vs OBB)
-# ---------------------------------------------------------------------------
-def _result_pred(r):
-    """Oriented-detection models populate ``r.obb``; standard detection uses ``r.boxes``."""
-    obb = getattr(r, "obb", None)
-    if obb is not None:
-        return obb
-    return getattr(r, "boxes", None)
-
-
-# ---------------------------------------------------------------------------
 # SAHI sliced inference
 # ---------------------------------------------------------------------------
 def run_sahi_detection(
     img: np.ndarray,
-    confidence: float = 0.25,
-    slice_size: int = 640,
-    overlap: float = 0.2,
+    confidence: float = 0.20,
+    slice_size: int = 1280,
+    overlap: float = 0.25,
     job_id: str = "",
     file_id: str = "",
     loop: Optional[asyncio.AbstractEventLoop] = None,
-    full_imgsz: int = 1280,
-    nms_iou: float = 0.5,
-    sahi_tiled: bool = True,
 ):
-    """Run YOLO full-image + optional GPU-batched tiled slices on a single image."""
+    """Run YOLO full-image + GPU-batched sliced inference on a single image."""
     model = get_model()
+    jb = jobs.get(job_id) if job_id else None
+    nms_iou = float(jb.get("nms_iou", 0.10)) if jb else 0.10
+    full_imgsz = int(jb.get("full_imgsz", 1280)) if jb else 1280
+    use_tiling = bool(jb.get("sahi_tiled", True)) if jb else True
 
     def _emit_progress(current: int, total_steps: int, pct: int):
         if loop and job_id:
@@ -298,45 +433,97 @@ def run_sahi_detection(
                 loop,
             )
 
-    total_steps = 2 if sahi_tiled else 1
+    _emit_progress(0, 2, 5)
 
-    # Full-image pass on GPU (FP16 on CUDA via half= — same path as batched video)
-    _emit_progress(0, total_steps, 5)
-    full_results = model.predict(
-        img, conf=confidence, device=DEVICE, imgsz=full_imgsz, verbose=False, **_yolo_predict_kw()
-    )
-    full_dets = []
-    for r in full_results:
-        pred = _result_pred(r)
-        if pred is None:
-            continue
-        for box in pred:
-            cls_id = int(box.cls[0])
-            full_dets.append({
-                "bbox": box.xyxy[0].tolist(),
-                "confidence": float(box.conf[0]),
-                "class_id": cls_id,
-                "class_name": model.names.get(cls_id, str(cls_id)),
-                "source": "full",
-            })
-    _emit_progress(1, total_steps, 40 if sahi_tiled else 85)
+    # If tiling is off, run only the full-image pass.
+    if not use_tiling:
+        full_results = model.predict(
+            img, conf=confidence, imgsz=full_imgsz, device=DEVICE,
+            verbose=False, **_yolo_predict_kw(),
+        )
+        full_dets = []
+        for r in full_results:
+            for box in r.boxes:
+                cls_id = int(box.cls[0])
+                full_dets.append({
+                    "bbox": box.xyxy[0].tolist(),
+                    "confidence": float(box.conf[0]),
+                    "class_id": cls_id,
+                    "class_name": model.names.get(cls_id, str(cls_id)),
+                    "source": "full",
+                })
+        _emit_progress(2, 2, 85)
+        if len(full_dets) > 0:
+            full_dets = _nms_merge(full_dets, iou_threshold=nms_iou)
+        return full_dets
 
+    # Build slice grid
+    img_h, img_w = img.shape[:2]
+    step_h = max(1, int(slice_size * (1 - overlap)))
+    step_w = max(1, int(slice_size * (1 - overlap)))
+
+    slices: list[np.ndarray] = []
+    offsets: list[tuple[int, int]] = []
+    for y in range(0, img_h, step_h):
+        for x in range(0, img_w, step_w):
+            y2 = min(y + slice_size, img_h)
+            x2 = min(x + slice_size, img_w)
+            slices.append(img[y:y2, x:x2])
+            offsets.append((x, y))
+
+    full_dets: list[dict] = []
     sahi_dets: list[dict] = []
-    if sahi_tiled:
-        # GPU-batched sliced prediction (all slices sent to GPU in batches instead of one-by-one)
-        img_h, img_w = img.shape[:2]
-        step_h = max(1, int(slice_size * (1 - overlap)))
-        step_w = max(1, int(slice_size * (1 - overlap)))
 
-        slices: list[np.ndarray] = []
-        offsets: list[tuple[int, int]] = []
-        for y in range(0, img_h, step_h):
-            for x in range(0, img_w, step_w):
-                y2 = min(y + slice_size, img_h)
-                x2 = min(x + slice_size, img_w)
-                slices.append(img[y:y2, x:x2])
-                offsets.append((x, y))
+    # Fast path: when imgsz of the full pass equals the slice size, send the full image
+    # and all slices in ONE remote batch (one HTTP round-trip + one batched GPU forward
+    # pass instead of two). This is a pure-performance change — same model, same imgsz,
+    # same conf — so detections are identical to the two-call path.
+    if full_imgsz == slice_size and (1 + len(slices)) <= GPU_BATCH:
+        combined = [img] + slices
+        results = model.predict(
+            combined, conf=confidence, device=DEVICE,
+            imgsz=slice_size, verbose=False, **_yolo_predict_kw(),
+        )
+        if results:
+            for box in results[0].boxes:
+                cls_id = int(box.cls[0])
+                full_dets.append({
+                    "bbox": box.xyxy[0].tolist(),
+                    "confidence": float(box.conf[0]),
+                    "class_id": cls_id,
+                    "class_name": model.names.get(cls_id, str(cls_id)),
+                    "source": "full",
+                })
+            for r, (x_off, y_off) in zip(results[1:], offsets):
+                for box in r.boxes:
+                    cls_id = int(box.cls[0])
+                    bx1, by1, bx2, by2 = box.xyxy[0].tolist()
+                    sahi_dets.append({
+                        "bbox": [bx1 + x_off, by1 + y_off, bx2 + x_off, by2 + y_off],
+                        "confidence": float(box.conf[0]),
+                        "class_id": cls_id,
+                        "class_name": model.names.get(cls_id, str(cls_id)),
+                        "source": "sahi",
+                    })
+    else:
+        # Full-image pass
+        full_results = model.predict(
+            img, conf=confidence, imgsz=full_imgsz, device=DEVICE,
+            verbose=False, **_yolo_predict_kw(),
+        )
+        for r in full_results:
+            for box in r.boxes:
+                cls_id = int(box.cls[0])
+                full_dets.append({
+                    "bbox": box.xyxy[0].tolist(),
+                    "confidence": float(box.conf[0]),
+                    "class_id": cls_id,
+                    "class_name": model.names.get(cls_id, str(cls_id)),
+                    "source": "full",
+                })
+        _emit_progress(1, 2, 40)
 
+        # GPU-batched sliced prediction
         for b_start in range(0, len(slices), GPU_BATCH):
             b_slices = slices[b_start : b_start + GPU_BATCH]
             b_offsets = offsets[b_start : b_start + GPU_BATCH]
@@ -345,10 +532,7 @@ def run_sahi_detection(
                 imgsz=slice_size, verbose=False, **_yolo_predict_kw(),
             )
             for r, (x_off, y_off) in zip(results, b_offsets):
-                pred = _result_pred(r)
-                if pred is None:
-                    continue
-                for box in pred:
+                for box in r.boxes:
                     cls_id = int(box.cls[0])
                     bx1, by1, bx2, by2 = box.xyxy[0].tolist()
                     sahi_dets.append({
@@ -359,7 +543,7 @@ def run_sahi_detection(
                         "source": "sahi",
                     })
 
-        _emit_progress(2, total_steps, 85)
+    _emit_progress(2, 2, 85)
 
     all_dets = full_dets + sahi_dets
     if len(all_dets) > 0:
@@ -391,76 +575,52 @@ def _nms_merge(dets: list[dict], iou_threshold: float = 0.5) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Annotate image with bounding boxes (in-place for video speed)
 # ---------------------------------------------------------------------------
-COLORS = [
-    (0, 255, 255), (255, 0, 255), (0, 255, 0), (255, 255, 0),
-    (255, 128, 0), (128, 0, 255), (0, 128, 255), (255, 0, 128),
-]
-
-_BBOX_SIZE_FILTER_EXEMPT = frozenset(
-    ("vegetation_encroachment", "tower_structural_corrosion", "simple_corrosion", "breakage_of_angle_braces", "bird_nest")
-)
-
-# Mirrors frontend SIDEBAR_COMPONENT_CLASS_KEYS — these draw GREEN; everything else draws RED.
-_COMPONENT_CLASS_KEYS = frozenset((
-    "insulator",
-    "foundation_pedestal",
-    "bolted_connection",
+# Two-tone scheme: components → green, defects → red. The 10 component class
+# names below come from the model's class taxonomy. Anything not in this set is
+# treated as a defect.
+COMPONENT_CLASSES: frozenset[str] = frozenset({
     "conductor",
-    "vibration_damper",
+    "bolted_connection",
+    "foreign_object",
+    "foundation_pedestal",
+    "insulator",
     "suspension_clamp",
-    "yoke_plate",
     "transmission_corridor",
-    "angle_brace",
-    "cross_arm",
     "two_glass",
-))
-_COMPONENT_BGR = (0, 255, 0)
-_DEFECT_BGR = (0, 0, 255)
+    "vibration_damper",
+    "yoke_plate",
+})
+
+# OpenCV uses BGR.
+COMPONENT_COLOR_BGR = (0, 200, 0)   # green
+DEFECT_COLOR_BGR    = (0, 0, 220)   # red
+
+
+def _normalize_class_name(name: str) -> str:
+    return name.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _color_for_class(class_name: str) -> tuple[int, int, int]:
+    return (
+        COMPONENT_COLOR_BGR
+        if _normalize_class_name(class_name) in COMPONENT_CLASSES
+        else DEFECT_COLOR_BGR
+    )
 
 
 def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.ndarray:
-    """Draw bounding boxes. Set copy=False for video frames (faster, in-place)."""
+    """Draw bounding boxes. Set copy=False for video frames (faster, in-place).
+
+    Components are drawn in green, defects in red.
+    """
     canvas = img.copy() if copy else img
     font_scale = 0.5 if copy else 0.7
     font_thickness = 1 if copy else 2
-    model = get_model()
-    names = getattr(model, "names", None) or {}
-
-    def _visual_cls_key(det: dict) -> str:
-        """True YOLO class (video may remap ``class_name`` only; ``class_id`` stays)."""
-        try:
-            cid = int(det.get("class_id", -1))
-            if cid >= 0 and isinstance(names, dict):
-                raw = names.get(cid)
-                if raw is None:
-                    raw = names.get(str(cid))
-                if raw is not None:
-                    return str(raw).strip().lower().replace("-", "_").replace(" ", "_")
-        except Exception:
-            pass
-        return str(det.get("class_name") or "").strip().lower().replace("-", "_").replace(" ", "_")
-
-    foreign_object_count = (
-        sum(1 for d in dets if _visual_cls_key(d) == "foreign_object")
-        if copy
-        else 0
-    )
-    img_h, img_w = canvas.shape[:2]
-    img_area = max(img_w * img_h, 1)
     for det in dets:
         x1, y1, x2, y2 = int(det["bbox"][0]), int(det["bbox"][1]), int(det["bbox"][2]), int(det["bbox"][3])
         class_name = str(det.get("class_name") or "").strip()
-        vk = _visual_cls_key(det)
-        if vk not in _BBOX_SIZE_FILTER_EXEMPT and copy:
-            bw = abs(x2 - x1)
-            bh = abs(y2 - y1)
-            area_ratio = (bw * bh) / img_area
-            if area_ratio > 0.003 and bh < bw * 3:
-                continue
-        color = _COMPONENT_BGR if vk in _COMPONENT_CLASS_KEYS else _DEFECT_BGR
+        color = _color_for_class(class_name)
         cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-        if copy and foreign_object_count > 3 and vk == "foreign_object":
-            class_name = "bolt_rust"
         label = class_name or "Defect"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
         label_y1 = max(0, y1 - th - 6)
@@ -473,16 +633,35 @@ def annotate_image(img: np.ndarray, dets: list[dict], copy: bool = True) -> np.n
 # ---------------------------------------------------------------------------
 # Process a single file (runs in thread pool)
 # ---------------------------------------------------------------------------
+def _decode_image_bytes(img_bytes: bytes) -> Optional[np.ndarray]:
+    """Decode JPEG/PNG via OpenCV; fall back to PIL for HEIC/EXIF-quirky / partial files.
+
+    Returns BGR numpy or None if both decoders fail.
+    """
+    if not img_bytes:
+        return None
+    arr = np.frombuffer(img_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is not None:
+        return img
+    # Fallback: PIL handles HEIC (with pillow-heif if installed), unusual EXIF,
+    # progressive JPEGs cv2 occasionally rejects, etc.
+    try:
+        with Image.open(io.BytesIO(img_bytes)) as pim:
+            pim = pim.convert("RGB")
+            rgb = np.asarray(pim)
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    except Exception:
+        return None
+
+
 def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
                  confidence: float, slice_size: int, overlap: float,
-                 full_imgsz: int, nms_iou: float, sahi_tiled: bool,
                  loop: asyncio.AbstractEventLoop):
     """Process one image: detect, annotate, save thumb+annotated, return result dict."""
     t0 = time.time()
 
-    # Decode image
-    arr = np.frombuffer(img_bytes, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    img = _decode_image_bytes(img_bytes)
     if img is None:
         return {"file_id": file_id, "filename": filename, "error": "Cannot decode image"}
 
@@ -493,45 +672,28 @@ def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
     )
 
     # Run detection
-    dets = run_sahi_detection(
-        img, confidence, slice_size, overlap, job_id, file_id, loop,
-        full_imgsz=full_imgsz, nms_iou=nms_iou, sahi_tiled=sahi_tiled,
-    )
-    for d in dets:
-        raw = str(d.get("class_name") or "").strip().lower().replace("-", " ").replace("_", " ")
-        if raw == "bolted connection missing nut":
-            d["class_name"] = "insulator"
-
-    breakage_count = sum(
-        1 for d in dets
-        if str(d.get("class_name") or "").strip().lower().replace("-", "_").replace(" ", "_")
-        == "breakage_of_angle_braces"
-    )
-    if breakage_count > 1:
-        for d in dets:
-            if (str(d.get("class_name") or "").strip().lower().replace("-", "_").replace(" ", "_")
-                    == "breakage_of_angle_braces"):
-                d["class_name"] = "insulator"
+    dets = run_sahi_detection(img, confidence, slice_size, overlap, job_id, file_id, loop)
 
     # Create output dir
     job_dir = RESULTS_DIR / job_id
     job_dir.mkdir(exist_ok=True)
 
-    # Save thumbnail (original resized)
-    thumb_path = job_dir / f"{file_id}_thumb.jpg"
+    # Annotate first (CPU work), then run all three JPEG writes in parallel via the
+    # shared annotate pool — they're independent so total disk-write time drops to ~max
+    # of the three instead of their sum.
     h, w = img.shape[:2]
     scale = min(640 / w, 640 / h, 1.0)
     thumb = cv2.resize(img, (int(w * scale), int(h * scale)))
-    cv2.imwrite(str(thumb_path), thumb, [cv2.IMWRITE_JPEG_QUALITY, 85])
-
-    # Save clean full-resolution original (no annotations) for filtered preview
-    clean_path = job_dir / f"{file_id}_clean.jpg"
-    cv2.imwrite(str(clean_path), img, [cv2.IMWRITE_JPEG_QUALITY, 90])
-
-    # Save annotated
     annotated = annotate_image(img, dets)
-    ann_path = job_dir / f"{file_id}_annotated.jpg"
-    cv2.imwrite(str(ann_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+    thumb_path = job_dir / f"{file_id}_thumb.jpg"
+    clean_path = job_dir / f"{file_id}_clean.jpg"
+    ann_path   = job_dir / f"{file_id}_annotated.jpg"
+
+    f1 = _annotate_pool.submit(cv2.imwrite, str(thumb_path), thumb, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    f2 = _annotate_pool.submit(cv2.imwrite, str(clean_path), img,   [cv2.IMWRITE_JPEG_QUALITY, 90])
+    f3 = _annotate_pool.submit(cv2.imwrite, str(ann_path),   annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    f1.result(); f2.result(); f3.result()
 
     elapsed_ms = (time.time() - t0) * 1000
     confs = [d["confidence"] for d in dets]
@@ -561,12 +723,110 @@ def process_file(job_id: str, file_id: str, img_bytes: bytes, filename: str,
 # Background worker: processes queued files for a job
 # ---------------------------------------------------------------------------
 async def _worker(job_id: str):
-    """Process files as they arrive for this job."""
+    """Process files as they arrive for this job.
+
+    - Pipelined: up to MAX_INFLIGHT files are processed concurrently.
+    - Robust on bulk batches: if a file fails because of a transient pod / proxy
+      hiccup we re-queue it (up to MAX_FILE_ATTEMPTS) with backoff, so a 200–3000
+      image job never loses files to short-lived 502/524s. Detection results
+      are unchanged when a file finally succeeds — same model, same params.
+    - Idle-based timeout instead of an absolute deadline so very large batches
+      can run as long as they are making progress.
+    """
     job = jobs.get(job_id)
     if not job:
         return
 
     loop = asyncio.get_event_loop()
+    MAX_INFLIGHT = int(os.environ.get("MAX_INFLIGHT_FILES", "2"))
+    MAX_FILE_ATTEMPTS = max(1, int(os.environ.get("MAX_FILE_ATTEMPTS", "4")))
+    IDLE_TIMEOUT_SEC = max(60, int(os.environ.get("WORKER_IDLE_TIMEOUT_SEC", "1800")))  # 30 min
+
+    last_progress_ts = time.time()
+
+    # Errors we know are NOT recoverable by retrying — fail immediately so we
+    # don't waste 4 attempts on the same broken input. Everything else is
+    # treated as transient and re-queued (network blips, proxy 5xx, GPU OOM
+    # spikes, RunPod restarts, etc) so a 200–3000 image batch never drops a
+    # file to a one-off hiccup.
+    PERMANENT_ERROR_NEEDLES = (
+        "cannot decode image",
+        "expects numpy arrays",
+        "job not found",
+        "weights file not found",
+        "no such file or directory",
+    )
+
+    def _is_transient(err_text: str) -> bool:
+        if not err_text:
+            return True  # unknown -> retry
+        e = err_text.lower()
+        if any(n in e for n in PERMANENT_ERROR_NEEDLES):
+            return False
+        return True
+
+    async def _emit_result(fid: str, fdata: dict, result: dict):
+        fdata["status"] = "done"
+        job["results"].append(result)
+        job["completed"] += 1
+        await sio.emit("detection_result", {
+            "job_id": job_id,
+            **result,
+            "completed": job["completed"],
+            "total": job["total"],
+        })
+
+    async def _emit_failure(fid: str, fdata: dict, err: str):
+        fdata["status"] = "error"
+        fdata["error"] = err
+        job["completed"] += 1
+        await sio.emit("detection_result", {
+            "job_id": job_id, "file_id": fid, "filename": fdata["filename"],
+            "error": err, "completed": job["completed"], "total": job["total"],
+        })
+
+    async def _handle_one(fid: str, fdata: dict):
+        nonlocal last_progress_ts
+        try:
+            result = await loop.run_in_executor(
+                None,
+                process_file,
+                job_id, fid, fdata["bytes"], fdata["filename"],
+                job["confidence"], job["slice_size"], job["overlap"],
+                loop,
+            )
+
+            if "error" in result:
+                err_text = str(result["error"])
+                attempts = int(fdata.get("attempts", 0)) + 1
+                if _is_transient(err_text) and attempts < MAX_FILE_ATTEMPTS:
+                    fdata["attempts"] = attempts
+                    fdata["status"] = "pending"
+                    fdata["next_retry_at"] = time.time() + min(2 ** attempts, 16)
+                    print(f"[WARN] file {fdata['filename']} attempt {attempts} failed ({err_text}); requeueing")
+                else:
+                    await _emit_failure(fid, fdata, err_text)
+            else:
+                await _emit_result(fid, fdata, result)
+            last_progress_ts = time.time()
+
+        except Exception as e:
+            err_text = str(e)
+            attempts = int(fdata.get("attempts", 0)) + 1
+            if _is_transient(err_text) and attempts < MAX_FILE_ATTEMPTS:
+                fdata["attempts"] = attempts
+                fdata["status"] = "pending"
+                fdata["next_retry_at"] = time.time() + min(2 ** attempts, 16)
+                print(f"[WARN] file {fdata['filename']} attempt {attempts} raised ({err_text}); requeueing")
+            else:
+                await _emit_failure(fid, fdata, err_text)
+            last_progress_ts = time.time()
+        finally:
+            # Only drop the upload bytes when we're not going to retry this file.
+            if fdata.get("status") != "pending":
+                fdata.pop("bytes", None)
+
+    inflight: set[asyncio.Task] = set()
 
     while True:
         if job.get("cancel_requested"):
@@ -584,71 +844,43 @@ async def _worker(job_id: str):
                         "completed": job["completed"],
                         "total": job["total"],
                     })
+            if inflight:
+                await asyncio.gather(*inflight, return_exceptions=True)
             break
 
-        # Find next unprocessed file
-        pending_file = None
-        for fid, fdata in job["files"].items():
-            if fdata["status"] == "pending":
+        # Fill up to MAX_INFLIGHT, skipping files whose backoff hasn't elapsed yet.
+        now = time.time()
+        while len(inflight) < MAX_INFLIGHT:
+            picked = None
+            for fid, fdata in job["files"].items():
+                if fdata["status"] != "pending":
+                    continue
+                if fdata.get("next_retry_at", 0) > now:
+                    continue
                 fdata["status"] = "processing"
-                pending_file = (fid, fdata)
+                picked = (fid, fdata)
                 break
+            if picked is None:
+                break
+            t = asyncio.create_task(_handle_one(picked[0], picked[1]))
+            inflight.add(t)
 
-        if pending_file is None:
+        if not inflight:
             all_finished = (
                 len(job["files"]) >= job["total"]
                 and all(f["status"] in ("done", "error") for f in job["files"].values())
             )
             if all_finished:
                 break
-            await asyncio.sleep(0.3)
-            if time.time() - job["created_at"] > 600:
+            # Idle timeout based on no progress for IDLE_TIMEOUT_SEC, NOT on
+            # job age — large batches must run as long as they keep finishing.
+            if time.time() - last_progress_ts > IDLE_TIMEOUT_SEC:
                 break
+            await asyncio.sleep(0.2)
             continue
 
-        fid, fdata = pending_file
-        try:
-            result = await loop.run_in_executor(
-                None,
-                process_file,
-                job_id, fid, fdata["bytes"], fdata["filename"],
-                job["confidence"], job["slice_size"], job["overlap"],
-                job.get("full_imgsz", 1280),
-                job.get("nms_iou", 0.5),
-                job.get("sahi_tiled", True),
-                loop,
-            )
-
-            if "error" in result:
-                fdata["status"] = "error"
-                fdata["error"] = result["error"]
-                job["completed"] += 1
-                await sio.emit("detection_result", {
-                    "job_id": job_id, "file_id": fid, "filename": fdata["filename"],
-                    "error": result["error"], "completed": job["completed"], "total": job["total"],
-                })
-            else:
-                fdata["status"] = "done"
-                job["results"].append(result)
-                job["completed"] += 1
-
-                await sio.emit("detection_result", {
-                    "job_id": job_id,
-                    **result,
-                    "completed": job["completed"],
-                    "total": job["total"],
-                })
-
-        except Exception as e:
-            fdata["status"] = "error"
-            fdata["error"] = str(e)
-            job["completed"] += 1
-            await sio.emit("detection_result", {
-                "job_id": job_id, "file_id": fid, "filename": fdata["filename"],
-                "error": str(e), "completed": job["completed"], "total": job["total"],
-            })
-        finally:
-            fdata.pop("bytes", None)
+        done, _pending = await asyncio.wait(inflight, return_when=asyncio.FIRST_COMPLETED)
+        inflight -= done
 
     if job.get("cancel_requested"):
         job["status"] = "cancelled"
@@ -747,17 +979,20 @@ async def batch_start(payload: dict):
     if model_id and model_id in AVAILABLE_MODELS and AVAILABLE_MODELS[model_id]["path"] != _model_path:
         switch_model(model_id)
 
-    confidence = float(payload.get("det_confidence", 0.25))
-    slice_size = int(payload.get("det_slice_size", 1280))
-    overlap = float(payload.get("det_overlap", 0.25))
+    confidence = payload.get("det_confidence", 0.20)
+    slice_size = payload.get("det_slice_size", 1280)
+    overlap = payload.get("det_overlap", 0.25)
+    nms_iou = float(payload.get("det_nms_iou", 0.10))
     full_imgsz = int(payload.get("det_full_imgsz", 1280))
-    nms_iou = float(payload.get("det_nms_iou", 0.5))
     sahi_tiled = bool(payload.get("det_sahi_tiled", True))
     source = payload.get("source", "rgb")
 
     job = _new_job(
-        total, confidence, slice_size, overlap, source=source,
-        full_imgsz=full_imgsz, nms_iou=nms_iou, sahi_tiled=sahi_tiled,
+        total, confidence, slice_size, overlap,
+        source=source,
+        nms_iou=nms_iou,
+        full_imgsz=full_imgsz,
+        sahi_tiled=sahi_tiled,
     )
 
     threading.Thread(target=get_model, daemon=True).start()
@@ -893,22 +1128,6 @@ def _reencode_to_h264(src: str, dst: str, fps: float) -> bool:
     return False
 
 
-_VIDEO_LABEL_REMAP = {
-    "bolted_connection_missing_nut": "insulator",
-    "bolted connection missing nut": "insulator",
-    "foreign_object": "bolt_rust",
-    "foreign object": "bolt_rust",
-}
-
-def _remap_video_labels(per_frame: list[list[dict]]) -> None:
-    """In-place rename class labels for video detections only."""
-    for dets in per_frame:
-        for d in dets:
-            raw = str(d.get("class_name") or "").strip()
-            mapped = _VIDEO_LABEL_REMAP.get(raw) or _VIDEO_LABEL_REMAP.get(raw.lower().replace("-", "_"))
-            if mapped:
-                d["class_name"] = mapped
-
 def _open_video_capture(path: str) -> cv2.VideoCapture:
     """Open video with hardware-accelerated decode (NVDEC / D3D11VA / DXVA) when available."""
     _hw_prop = getattr(cv2, "CAP_PROP_HW_ACCELERATION", None)
@@ -923,10 +1142,8 @@ def _open_video_capture(path: str) -> cv2.VideoCapture:
     return cv2.VideoCapture(path)
 
 
-def _batch_detect(
-    model, frames: list[np.ndarray], confidence: float, imgsz: int = 1280
-) -> list[list[dict]]:
-    """Run YOLO on a batch of frames (single GPU call)."""
+def _batch_detect(model, frames: list[np.ndarray], confidence: float, imgsz: int = 1280) -> list[list[dict]]:
+    """Run YOLO on a batch of frames (single batched GPU call)."""
     results = model.predict(
         frames, conf=confidence, device=DEVICE,
         imgsz=imgsz, verbose=False, **_yolo_predict_kw(),
@@ -934,16 +1151,14 @@ def _batch_detect(
     per_frame: list[list[dict]] = []
     for r in results:
         dets = []
-        pred = _result_pred(r)
-        if pred is not None:
-            for box in pred:
-                cls_id = int(box.cls[0])
-                dets.append({
-                    "bbox": box.xyxy[0].tolist(),
-                    "confidence": float(box.conf[0]),
-                    "class_id": cls_id,
-                    "class_name": model.names.get(cls_id, str(cls_id)),
-                })
+        for box in r.boxes:
+            cls_id = int(box.cls[0])
+            dets.append({
+                "bbox": box.xyxy[0].tolist(),
+                "confidence": float(box.conf[0]),
+                "class_id": cls_id,
+                "class_name": model.names.get(cls_id, str(cls_id)),
+            })
         per_frame.append(dets)
     return per_frame
 
@@ -951,7 +1166,6 @@ def _batch_detect(
 def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                          confidence: float, slice_size: int, overlap: float,
                          frame_interval: float,
-                         full_imgsz: int,
                          loop: asyncio.AbstractEventLoop) -> dict:
     """GPU-saturated video pipeline:
     - Reader thread keeps a deep frame buffer ahead of GPU
@@ -975,13 +1189,6 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
     out_dir.mkdir(exist_ok=True)
     raw_path = out_dir / "raw.mp4"
     writer = cv2.VideoWriter(str(raw_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-
-    # Side-by-side un-annotated copy + per-frame bboxes power the client-side
-    # canvas overlay that filters detection boxes on the playing video.
-    original_raw_path = out_dir / "original_raw.mp4"
-    original_writer = cv2.VideoWriter(
-        str(original_raw_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)
-    )
 
     frame_q: queue.Queue = queue.Queue(maxsize=READ_AHEAD)
     read_done = threading.Event()
@@ -1043,8 +1250,7 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                 break
 
             # GPU inference (CPU annotation threads from the previous batch run concurrently)
-            per_frame_dets = _batch_detect(model, batch, confidence, imgsz=full_imgsz)
-            _remap_video_labels(per_frame_dets)
+            per_frame_dets = _batch_detect(model, batch, confidence, slice_size)
 
             # Flush previous batch: wait for its annotation, write frames, update counters
             if _prev_ann_futs is not None:
@@ -1080,11 +1286,6 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
                     }),
                     loop,
                 )
-
-            # Capture un-annotated frames now — VideoWriter.write() copies pixels into the
-            # encoder synchronously, so subsequent in-place annotation cannot race the writer.
-            for _orig_frame in batch:
-                original_writer.write(_orig_frame)
 
             # Submit annotation for current batch (non-blocking; runs on CPU while next GPU batch executes)
             _prev_ann_futs = [_annotate_pool.submit(annotate_image, f, d, False)
@@ -1134,10 +1335,6 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
         except Exception:
             pass
         try:
-            original_writer.release()
-        except Exception:
-            pass
-        try:
             cap.release()
         except Exception:
             pass
@@ -1151,11 +1348,6 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
         try:
             if raw_path.exists():
                 raw_path.unlink()
-        except Exception:
-            pass
-        try:
-            if original_raw_path.exists():
-                original_raw_path.unlink()
         except Exception:
             pass
         try:
@@ -1179,16 +1371,12 @@ def _process_whole_video(job_id: str, file_id: str, tmp_path: str,
         except Exception:
             pass
 
-    # H.264 re-encode the un-annotated copy used by the client overlay player.
+    # Build un-annotated browser video directly from the original upload to avoid
+    # per-frame duplicate writes during inference.
     original_h264_path = out_dir / "original.mp4"
-    if not _reencode_to_h264(str(original_raw_path), str(original_h264_path), fps):
+    if not _reencode_to_h264(str(tmp_path), str(original_h264_path), fps):
         try:
-            shutil.move(str(original_raw_path), str(original_h264_path))
-        except Exception:
-            pass
-    else:
-        try:
-            os.unlink(str(original_raw_path))
+            shutil.copyfile(str(tmp_path), str(original_h264_path))
         except Exception:
             pass
 
@@ -1261,7 +1449,7 @@ def _video_det_backfill_lock(file_id: str) -> threading.Lock:
         return _video_det_backfill_locks[file_id]
 
 
-def _collect_detections_from_video_file(video_path: str, confidence: float) -> list:
+def _collect_detections_from_video_file(video_path: str, confidence: float, imgsz: int = 1280) -> list:
     """Run the same batched YOLO path as whole-video processing; no annotate/write."""
     model = get_model()
     cap = _open_video_capture(video_path)
@@ -1278,8 +1466,7 @@ def _collect_detections_from_video_file(video_path: str, confidence: float) -> l
                 batch.append(frm)
             if not batch:
                 break
-            per_frame_dets = _batch_detect(model, batch, confidence, imgsz=1280)
-            _remap_video_labels(per_frame_dets)
+            per_frame_dets = _batch_detect(model, batch, confidence, imgsz)
             for dets in per_frame_dets:
                 for d in dets:
                     all_list.append({
@@ -1292,14 +1479,14 @@ def _collect_detections_from_video_file(video_path: str, confidence: float) -> l
     return all_list
 
 
-def _backfill_stored_video_detections(file_id: str, video_path: str, confidence: float) -> list:
+def _backfill_stored_video_detections(file_id: str, video_path: str, confidence: float, imgsz: int = 1280) -> list:
     """Create detections.json for legacy runs that only have mp4 on disk."""
     lk = _video_det_backfill_lock(file_id)
     with lk:
         cached = _load_stored_video_detections(file_id)
         if cached:
             return cached
-        lst = _collect_detections_from_video_file(video_path, confidence)
+        lst = _collect_detections_from_video_file(video_path, confidence, imgsz)
         out_dir = RESULTS_DIR / file_id
         try:
             with open(out_dir / "detections.json", "w", encoding="utf-8") as fp:
@@ -1368,7 +1555,6 @@ async def _video_item_worker(job_id: str):
                 job_id, fid, fdata["tmp_path"],
                 vjob["confidence"], vjob["slice_size"], vjob["overlap"],
                 vjob.get("frame_interval", 1),
-                int(vjob.get("full_imgsz", 1280)),
                 loop,
             )
             fdata["status"] = "done"
@@ -1423,10 +1609,9 @@ async def video_batch_start(payload: dict):
         "job_id": vid_id,
         "total": total,
         "completed": 0,
-        "confidence": float(payload.get("det_confidence", 0.25)),
-        "slice_size": int(payload.get("det_slice_size", 1280)),
-        "overlap": float(payload.get("det_overlap", 0.25)),
-        "full_imgsz": int(payload.get("det_full_imgsz", 1280)),
+        "confidence": payload.get("det_confidence", 0.20),
+        "slice_size": payload.get("det_slice_size", 1280),
+        "overlap": payload.get("det_overlap", 0.25),
         "frame_interval": payload.get("frame_interval", 1),
         "files": {},
         "status": "active",
@@ -1509,7 +1694,7 @@ async def video_results(vid_id: str):
 
 
 @app.get("/api/video/detections/{file_id}")
-async def api_video_stored_detections(file_id: str, confidence: float = 0.25):
+async def api_video_stored_detections(file_id: str, confidence: float = 0.20, imgsz: int = 1280):
     """Return per-box list from disk, or backfill from raw/annotated mp4 if missing (legacy uploads)."""
     if not file_id or len(file_id) > 48 or not all(c in "0123456789abcdefABCDEF" for c in file_id):
         raise HTTPException(400, "invalid file_id")
@@ -1530,10 +1715,7 @@ async def api_video_stored_detections(file_id: str, confidence: float = 0.25):
     loop = asyncio.get_event_loop()
     data = await loop.run_in_executor(
         None,
-        _backfill_stored_video_detections,
-        file_id,
-        vpath,
-        confidence,
+        lambda: _backfill_stored_video_detections(file_id, vpath, confidence, imgsz),
     )
     return data
 
@@ -1613,6 +1795,10 @@ def _build_run_entry(jid, job, run_type):
                 "source": fsource,
                 "status": fdata.get("status", "pending"),
                 "thumb_url": res.get("thumb_url"), "video_url": res.get("video_url"),
+                "original_url": res.get("original_url"),
+                "frames_url": res.get("frames_url"),
+                "video_width": res.get("video_width"),
+                "video_height": res.get("video_height"),
                 "total_detections": d, "duration": res.get("duration", 0),
                 "fps": res.get("fps", 0), "frames_analyzed": res.get("frames_analyzed", 0),
                 "avg_confidence": ac, "max_confidence": res.get("max_confidence", 0),
@@ -1882,6 +2068,8 @@ async def health():
         "gpu": gpu_name,
         "half_precision": USE_HALF,
         "service": "detection-server",
+        "remote_inference_url": POD_INFERENCE_URL,
+        "remote_inference_role": "YOLO/SAHI forward runs on the RunPod pod GPU (port 6006); this process orchestrates I/O and batching.",
     }
 
 

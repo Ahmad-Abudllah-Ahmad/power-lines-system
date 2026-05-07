@@ -137,10 +137,14 @@ type ModelInfo = { id: string; title: string; path: string; description: string 
 export type VideoUploadProps = { embedded?: boolean };
 
 export default function VideoUpload({ embedded = false }: VideoUploadProps) {
+  const persistenceEnabled = !embedded;
   const [localVideos, setLocalVideos] = useState<LocalVideo[]>([]);
   // Hydrate persisted UI state synchronously so a server restart + page reload
   // restores completed video cards, preview selection, batch progress and job id.
-  const _persistedOnMount = useMemo(() => loadPersistedVideoState(), []);
+  const _persistedOnMount = useMemo(
+    () => (persistenceEnabled ? loadPersistedVideoState() : null),
+    [persistenceEnabled]
+  );
   const [cards, setCards] = useState<Map<string, VideoCard>>(
     () => new Map(_persistedOnMount?.cards ?? [])
   );
@@ -195,6 +199,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
   // Mirror UI state to localStorage so a backend restart + page reload still
   // shows the same completed videos, preview selection and job context.
   useEffect(() => {
+    if (!persistenceEnabled) return;
     if (cards.size === 0 && !jobId && !previewId) {
       clearPersistedVideoState();
       return;
@@ -207,7 +212,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
       batchProgress,
       nameMap: Array.from(nameToKeyRef.current.entries()),
     });
-  }, [cards, jobId, jobCreatedAt, previewId, batchProgress]);
+  }, [cards, jobId, jobCreatedAt, previewId, batchProgress, persistenceEnabled]);
 
   useEffect(() => {
     fetch("/api/models")
@@ -311,8 +316,8 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
     socketRef.current = null;
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     nameToKeyRef.current.clear();
-    clearPersistedVideoState();
-  }, [localVideos]);
+    if (persistenceEnabled) clearPersistedVideoState();
+  }, [localVideos, persistenceEnabled]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -1048,7 +1053,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full bg-[var(--dash-elevated-bg)] dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem+3.5rem)] md:right-[calc(320px+1rem+3.5rem+220px)]"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full bg-[var(--dash-elevated-bg)] dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem+3.5rem+220px)]"
               >
                 <ChevronRight size={24} />
               </button>

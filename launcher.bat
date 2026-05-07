@@ -9,7 +9,7 @@ setlocal EnableDelayedExpansion
 set "ROOT=%~dp0"
 set "BACKEND_DIR=%ROOT%backend"
 set "FRONTEND_DIR=%ROOT%frontend"
-set "VENV_PYTHON=%BACKEND_DIR%\.venv\Scripts\python.exe"
+set "VENV_PYTHON=%BACKEND_DIR%\venv\Scripts\python.exe"
 set "FRONTEND_URL=http://localhost:5173"
 set "BACKEND_PORT=8001"
 
@@ -20,7 +20,7 @@ if not exist "%VENV_PYTHON%" (
     echo [ERROR] Python virtual environment not found at:
     echo         %VENV_PYTHON%
     echo.
-    echo Please run:  cd backend ^&^& python -m venv .venv ^&^& .venv\Scripts\pip install -r requirements.txt
+    echo Please run:  cd backend ^&^& python -m venv venv ^&^& venv\Scripts\pip install -r requirements-gpu.txt
     pause
     exit /b 1
 )
