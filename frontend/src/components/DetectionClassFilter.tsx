@@ -6,8 +6,6 @@ import {
   formatDetectionSidebarLabel,
   normalizeDetectionClassKey,
 } from "../utils/detectionSidebarBuckets";
-import { rgbAnnotationTunablesFromDetections } from "../utils/rgbAnnotationLensAdjust";
-
 /** 3-column tile grid for RGB/thermal file lists and detection result cards (Dashboard, Runs, AIDetection, ThermalImages). */
 export const DETECTION_FILE_GRID_CLASS = "grid grid-cols-3 gap-2 sm:gap-3";
 
@@ -15,6 +13,9 @@ export const DETECTION_FILE_GRID_CLASS = "grid grid-cols-3 gap-2 sm:gap-3";
 export const RGB_PREVIEW_ZOOM_MIN = 0.25;
 export const RGB_PREVIEW_ZOOM_MAX = 10;
 export const RGB_PREVIEW_ZOOM_STEP = 0.25;
+
+/** Fixed stroke/label scale for RGB canvas overlay (no scene-based “zoom” tuning). */
+const RGB_OVERLAY_LINE_LABEL_SCALE = 0.65;
 
 export type DetectionRowLike = {
   class_name?: string;
@@ -87,12 +88,71 @@ export function filterRowsByVisibleClasses<T extends DetectionRowLike>(rows: T[]
   return rows.filter((d) => !hiddenKeys.has(normalizeDetectionClassKey(d.class_name ?? d.label)));
 }
 
+/** Drop redundant rows (same class + identical bbox key, or same-class IoU ≥ 0.5 vs a larger kept box) so the canvas does not stack duplicate boxes. */
+function dedupeOverlayDetections(detections: DetectionRowLike[]): DetectionRowLike[] {
+  const seenExact = new Set<string>();
+  const withValidBbox: DetectionRowLike[] = [];
+  for (const d of detections) {
+    const b = d.bbox;
+    if (!Array.isArray(b) || b.length < 4) continue;
+    const [x1, y1, x2, y2] = b;
+    if (![x1, y1, x2, y2].every((n) => Number.isFinite(Number(n)))) continue;
+    const cls = normalizeDetectionClassKey(d.class_name ?? d.label);
+    const key = `${cls}:${Number(x1).toFixed(2)},${Number(y1).toFixed(2)},${Number(x2).toFixed(2)},${Number(y2).toFixed(2)}`;
+    if (seenExact.has(key)) continue;
+    seenExact.add(key);
+    withValidBbox.push(d);
+  }
+
+  const sorted = [...withValidBbox].sort((a, b) => {
+    const ba = a.bbox!;
+    const bb = b.bbox!;
+    const aa = Math.max(0, Number(ba[2]) - Number(ba[0])) * Math.max(0, Number(ba[3]) - Number(ba[1]));
+    const ab = Math.max(0, Number(bb[2]) - Number(bb[0])) * Math.max(0, Number(bb[3]) - Number(bb[1]));
+    return ab - aa;
+  });
+
+  const out: DetectionRowLike[] = [];
+  for (const cand of sorted) {
+    const cb = cand.bbox!.map(Number);
+    const [cx1, cy1, cx2, cy2] = cb;
+    const cArea = Math.max(0, cx2 - cx1) * Math.max(0, cy2 - cy1);
+    if (cArea <= 0) continue;
+    const cCls = normalizeDetectionClassKey(cand.class_name ?? cand.label);
+    let redundant = false;
+    for (const kept of out) {
+      const kCls = normalizeDetectionClassKey(kept.class_name ?? kept.label);
+      if (kCls !== cCls) continue;
+      const kb = kept.bbox!.map(Number);
+      const [kx1, ky1, kx2, ky2] = kb;
+      const kArea = Math.max(0, kx2 - kx1) * Math.max(0, ky2 - ky1);
+      if (kArea <= 0) continue;
+      const ix1 = Math.max(cx1, kx1);
+      const iy1 = Math.max(cy1, ky1);
+      const ix2 = Math.min(cx2, kx2);
+      const iy2 = Math.min(cy2, ky2);
+      const iw = Math.max(0, ix2 - ix1);
+      const ih = Math.max(0, iy2 - iy1);
+      const inter = iw * ih;
+      const union = cArea + kArea - inter;
+      const iou = union > 0 ? inter / union : 0;
+      if (iou >= 0.5) {
+        redundant = true;
+        break;
+      }
+    }
+    if (!redundant) out.push(cand);
+  }
+  return out;
+}
+
 export function redrawRgbDetectionOverlay(
   img: HTMLImageElement,
   canvas: HTMLCanvasElement,
   opts: { sourceW: number; sourceH: number; detections: DetectionRowLike[] }
 ): void {
-  const { sourceW, sourceH, detections } = opts;
+  const { sourceW, sourceH, detections: rawDetections } = opts;
+  const detections = dedupeOverlayDetections(rawDetections);
   const nw = img.naturalWidth;
   const nh = img.naturalHeight;
   if (!nw || !nh || sourceW <= 0 || sourceH <= 0) return;
@@ -117,11 +177,9 @@ export function redrawRgbDetectionOverlay(
   const ty = nh / sourceH;
   /** Source pixel → CSS pixel scale (stroke/font scale with preview size). */
   const srcToCss = Math.min(tx, ty) * ctr;
-  const lens = rgbAnnotationTunablesFromDetections(detections, sourceW, sourceH);
-  const scaleVis = lens.lineAndLabelScale;
-  const linePx = Math.max(1, srcToCss * scaleVis);
-  const fontPx = Math.max(8, Math.round(8 * srcToCss * scaleVis));
-  const padCss = srcToCss * scaleVis;
+  const linePx = Math.max(1, srcToCss * RGB_OVERLAY_LINE_LABEL_SCALE);
+  const fontPx = Math.max(8, Math.round(8 * srcToCss * RGB_OVERLAY_LINE_LABEL_SCALE));
+  const padCss = srcToCss * RGB_OVERLAY_LINE_LABEL_SCALE;
 
   for (const d of detections) {
     const b = d.bbox;

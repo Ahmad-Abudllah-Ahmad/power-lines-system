@@ -418,12 +418,13 @@ function RecentBatchUploadDetailModal({
     label?: string;
   }>;
 
-  const dashFilteredImgSrc = clsFilter.hiddenSet.size > 0
-    ? (cleanResolved || thumbResolved)
-    : previewOverlaySrc;
+  const batchUnderlaySrc = cleanResolved || thumbResolved;
+  const showLiveThumbOverlay =
+    !videoSrc && previewHasSourceDims && Boolean(batchUnderlaySrc);
+  const dashFilteredImgSrc = showLiveThumbOverlay ? batchUnderlaySrc : mainImg;
 
   useRgbPreviewDetectionOverlay(batchDetailPreviewImgRef, batchDetailPreviewCanvasRef, {
-    enabled: Boolean(!videoSrc && previewHasSourceDims && previewOverlaySrc),
+    enabled: showLiveThumbOverlay,
     sourceW: iw,
     sourceH: ih,
     detections: overlayDetections,
@@ -442,9 +443,6 @@ function RecentBatchUploadDetailModal({
     if (n <= 0) return;
     onFileIndexChange(Math.max(0, Math.min(i, n - 1)));
   };
-
-  const showLiveThumbOverlay =
-    !videoSrc && previewHasSourceDims && Boolean(previewOverlaySrc);
 
   const batchVideoSidebarComplete = ["completed", "complete"].includes(
     String(run?.status ?? "").toLowerCase()

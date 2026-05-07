@@ -578,17 +578,18 @@ export default function AIDetection() {
   const previewHasSourceDims =
     (previewCard?.imageWidth ?? 0) > 0 && (previewCard?.imageHeight ?? 0) > 0;
   const previewFallbackSrc = previewCard?.thumbUrl || previewCard?.localPreview || "";
-  const previewCleanSrc = previewCard?.cleanUrl || previewFallbackSrc;
-  const previewBaseSrc = clsFilter.hiddenSet.size > 0
-    ? previewCleanSrc
-    : (previewCard?.annotatedUrl || previewFallbackSrc);
+  const previewUnderlaySrc = previewCard?.cleanUrl || previewFallbackSrc;
+  const previewStaticSrc = previewCard?.annotatedUrl || previewFallbackSrc;
+  const previewShowLiveOverlay =
+    Boolean(previewCard) && previewHasSourceDims && Boolean(previewUnderlaySrc);
+  const previewImgSrc = previewShowLiveOverlay ? previewUnderlaySrc : previewStaticSrc;
 
   useRgbPreviewDetectionOverlay(previewImgRef, previewCanvasRef, {
-    enabled: Boolean(previewCard && previewHasSourceDims && Boolean(previewBaseSrc)),
+    enabled: previewShowLiveOverlay,
     sourceW: previewCard?.imageWidth ?? 0,
     sourceH: previewCard?.imageHeight ?? 0,
     detections: filterRowsForRgbPreviewOverlay(previewDetections, clsFilter.hiddenSet) as Detection[],
-    imageUrlKey: previewBaseSrc ?? "",
+    imageUrlKey: previewImgSrc ?? "",
     modalZoom,
   });
 
@@ -1057,12 +1058,12 @@ export default function AIDetection() {
                 >
                   <img
                     ref={previewImgRef}
-                    src={previewBaseSrc || ""}
+                    src={previewImgSrc || ""}
                     alt={previewCard.filename}
                     className="block max-h-[85vh] w-auto rounded-lg object-contain shadow-2xl"
                     draggable={false}
                   />
-                  {previewHasSourceDims && Boolean(previewBaseSrc) ? (
+                  {previewShowLiveOverlay ? (
                     <canvas
                       ref={previewCanvasRef}
                       className="pointer-events-none absolute inset-0 h-full w-full rounded-lg"
@@ -1135,7 +1136,7 @@ export default function AIDetection() {
                       toggleKey={clsFilter.toggleKey}
                       showAll={clsFilter.showAll}
                       hideAll={clsFilter.hideAll}
-                      liveOverlayEnabled={previewHasSourceDims && Boolean(previewBaseSrc)}
+                      liveOverlayEnabled={previewShowLiveOverlay}
                     />
                   </div>
                   {previewCard.stats?.processing_time_ms != null && (

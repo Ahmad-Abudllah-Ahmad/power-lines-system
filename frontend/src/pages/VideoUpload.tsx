@@ -1048,7 +1048,7 @@ export default function VideoUpload({ embedded = false }: VideoUploadProps) {
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full bg-[var(--dash-elevated-bg)] dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(320px+1rem+3.5rem)] md:right-[calc(320px+1rem+3.5rem+220px)]"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full bg-[var(--dash-elevated-bg)] dash-text-primary p-2 hover:bg-[var(--dash-hover-bg)] transition-colors right-[calc(540px+1rem+3.5rem)]"
               >
                 <ChevronRight size={24} />
               </button>

@@ -16,8 +16,6 @@ export const SIDEBAR_COMPONENT_CLASS_KEYS = [
 /** Omit from sidebar component/defect lists (detections still exist elsewhere). */
 export const SIDEBAR_HIDDEN_CLASS_KEYS = new Set<string>([
   "simple_corrosion",
-  "pollution_flashover",
-  "foundation_concrete_crack",
 ]);
 
 export function normalizeDetectionClassKey(raw: unknown): string {

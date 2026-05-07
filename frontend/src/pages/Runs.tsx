@@ -866,6 +866,25 @@ export default function Runs() {
 
           const label = b.label || "Defect";
           const componentId = safeIdFromLabel(label);
+          const runMetaGps = (run as RunEntry & { metadata?: { gps?: { lat?: number; lng?: number } } }).metadata?.gps;
+          const lat =
+            typeof f.gps?.lat === "number"
+              ? f.gps.lat
+              : typeof run.gps?.lat === "number"
+                ? run.gps.lat
+                : typeof runMetaGps?.lat === "number"
+                  ? runMetaGps.lat
+                  : null;
+          const lng =
+            typeof f.gps?.lng === "number"
+              ? f.gps.lng
+              : typeof run.gps?.lng === "number"
+                ? run.gps.lng
+                : typeof runMetaGps?.lng === "number"
+                  ? runMetaGps.lng
+                  : null;
+          const latText = lat != null ? Number(lat).toFixed(6) : "—";
+          const lngText = lng != null ? Number(lng).toFixed(6) : "—";
 
           const defectHtml = `
             <section class="defect-block rgb-defect-pdf mb-4">
@@ -895,7 +914,7 @@ export default function Runs() {
                 </div>
               </div>
               <div class="mt-3">
-                <h2 class="text-sm font-bold text-blue-900 uppercase mb-2 border-b-2 border-gray-100 pb-1">Defect Description & Maintenance Plan</h2>
+                <h2 class="text-sm font-bold text-blue-900 mb-2 border-b-2 border-gray-100 pb-1">Details:</h2>
                 <div class="space-y-2">
                   <div class="grid grid-cols-4 gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
                     <div>
@@ -907,12 +926,12 @@ export default function Runs() {
                       <span class="block text-xs font-semibold text-gray-900 mt-0.5">${componentId}</span>
                     </div>
                     <div>
-                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Batch / Run ID</span>
-                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${run.run_id}</span>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">LONGITUDE</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${lngText}</span>
                     </div>
                     <div>
-                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Inspection Date</span>
-                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${inspectionDate}</span>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">LATITUDE</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${latText}</span>
                     </div>
                   </div>
                   <div>
@@ -1001,6 +1020,10 @@ export default function Runs() {
               <p class="text-xs text-gray-400 ${thermalPdfTight ? "mt-1" : "mt-2"}">Batch: <span class="font-Poppins">${run.run_id}</span> • Type: ${dtype.toUpperCase()} • Created: ${createdIso}</p>
               <p class="text-xs text-gray-400 mt-1">Assigned to: <span class="font-Poppins text-gray-600">${assigneeEscaped}</span></p>
               <p class="text-lg text-black mt-1.5 leading-relaxed font-medium">${pdfBatchMetaLine(batchTotal, approvedCount, batchProcessingMs)}</p>
+              <div class="mt-2 border-t border-gray-300 pt-2 flex items-center justify-between gap-6">
+                <p class="text-xs text-gray-700">Batch ID: <span class="font-semibold">${run.run_id}</span></p>
+                <p class="text-xs text-gray-700">Inspection date: <span class="font-semibold">${inspectionDate}</span></p>
+              </div>
             </div>
             <div class="mt-4 md:mt-0 text-right">
               <img src="${brandLogoSrc}" alt="AzərEnerji" class="${thermalPdfTight ? "h-24 md:h-28" : "h-[9rem] md:h-[10.5rem]"} w-auto object-contain ml-auto" />
@@ -1197,14 +1220,13 @@ ${pdfPageChunks.join("\n")}
   const runsPreviewCleanSrc = (previewFile as Record<string, unknown>)?.clean_url
     ? String((previewFile as Record<string, unknown>).clean_url).trim()
     : "";
-  const runsPreviewBaseSrc = clsFilter.hiddenSet.size > 0
-    ? (runsPreviewCleanSrc || runsPreviewThumbSrc)
-    : (runsPreviewAnnotatedSrc || runsPreviewThumbSrc);
+  const runsPreviewUnderlaySrc = runsPreviewCleanSrc || runsPreviewThumbSrc;
+  const runsPreviewStaticSrc = runsPreviewAnnotatedSrc || runsPreviewThumbSrc;
   const runsPreviewShowLiveOverlay =
     !isDjiThermalScanUpload &&
     previewRun?.type !== "video" &&
     runsPreviewHasSourceDims &&
-    Boolean(runsPreviewBaseSrc);
+    Boolean(runsPreviewUnderlaySrc);
 
   const runsOverlayDetections = filterRowsForRgbPreviewOverlay(
     previewDetectionRows as DetectionRowLike[],
@@ -1220,7 +1242,7 @@ ${pdfPageChunks.join("\n")}
     sourceW: runsPreviewSourceW,
     sourceH: runsPreviewSourceH,
     detections: runsOverlayDetections,
-    imageUrlKey: `${previewRun?.run_id}:${previewFileIdx}:${runsPreviewBaseSrc}`,
+    imageUrlKey: `${previewRun?.run_id}:${previewFileIdx}:${runsPreviewUnderlaySrc}`,
     modalZoom: previewModalZoom,
   });
   const thermalResultRow: Record<string, unknown> | null = (() => {
@@ -1811,7 +1833,11 @@ ${pdfPageChunks.join("\n")}
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2.5 hover:bg-[var(--dash-hover-bg)] transition-all duration-150 shadow-lg right-[max(1rem,calc(320px+0.5rem))]"
+                className={`absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2.5 hover:bg-[var(--dash-hover-bg)] transition-all duration-150 shadow-lg ${
+                  previewRun.type === "video"
+                    ? "right-[max(1rem,calc(540px+0.5rem))]"
+                    : "right-[max(1rem,calc(320px+0.5rem))]"
+                }`}
                 style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronRight size={20} />
@@ -2252,7 +2278,7 @@ ${pdfPageChunks.join("\n")}
                                   <>
                                     <img
                                       ref={runsPreviewImgRef}
-                                      src={runsPreviewBaseSrc}
+                                      src={runsPreviewUnderlaySrc}
                                       alt={previewFile.filename}
                                       className="w-full max-h-[80vh] rounded-2xl object-contain bg-black block"
                                       draggable={false}
@@ -2265,7 +2291,7 @@ ${pdfPageChunks.join("\n")}
                                   </>
                                 ) : (
                                   <img
-                                    src={runsPreviewAnnotatedSrc || runsPreviewThumbSrc}
+                                    src={runsPreviewStaticSrc}
                                     alt={previewFile.filename}
                                     className="w-full max-h-[80vh] rounded-2xl object-contain bg-black"
                                   />
