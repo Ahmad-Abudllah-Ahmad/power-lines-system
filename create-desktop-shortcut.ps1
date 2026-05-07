@@ -5,7 +5,7 @@
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot  = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$VenvPython   = Join-Path $ProjectRoot "backend\venv\Scripts\python.exe"
+$VenvPython   = Join-Path $ProjectRoot "backend\.venv\Scripts\python.exe"
 $LogoPng      = Join-Path $ProjectRoot "frontend\public\AZER-logo-chrometab-removebg-preview.png"
 $IconPath     = Join-Path $ProjectRoot "app-icon.ico"
 $LauncherBat  = Join-Path $ProjectRoot "launcher.bat"

@@ -245,22 +245,6 @@ function pdfBatchMetaLine(batchTotal: number, approvedCount: number, processingM
   return `Images in batch: <span class="font-Poppins text-black">${batchTotal}</span>. Approved for report: <span class="font-Poppins text-black">${approvedCount}</span>.<br/><span class="block mt-1">Batch processing time: <span class="font-Poppins text-black">${proc}</span></span>`;
 }
 
-function pdfBatchIdAndInspectionRow(runId: string, inspectionDate: string): string {
-  return `<div class="mt-2 pt-2 border-t border-gray-300 flex flex-row justify-between gap-4 text-xs text-gray-800">
-    <span>Batch ID: <span class="font-Poppins font-semibold text-black">${escapeReportHtml(runId)}</span></span>
-    <span>Inspection date: <span class="font-Poppins font-semibold text-black">${escapeReportHtml(inspectionDate)}</span></span>
-  </div>`;
-}
-
-function formatGpsForReport(gps: FileInfo["gps"]): { lat: string; lng: string } {
-  if (!gps || typeof gps !== "object") return { lat: "—", lng: "—" };
-  const lat = (gps as { lat?: unknown }).lat;
-  const lng = (gps as { lng?: unknown }).lng;
-  const latN = typeof lat === "number" && Number.isFinite(lat) ? lat.toFixed(6) : "—";
-  const lngN = typeof lng === "number" && Number.isFinite(lng) ? lng.toFixed(6) : "—";
-  return { lat: latN, lng: lngN };
-}
-
 function reportThermalUnitLabel(u: string): string {
   if (u === "Fahrenheit") return "°F";
   if (u === "Kelvin") return "K";
@@ -882,7 +866,6 @@ export default function Runs() {
 
           const label = b.label || "Defect";
           const componentId = safeIdFromLabel(label);
-          const { lat: latStr, lng: lngStr } = formatGpsForReport(f.gps);
 
           const defectHtml = `
             <section class="defect-block rgb-defect-pdf mb-4">
@@ -912,7 +895,7 @@ export default function Runs() {
                 </div>
               </div>
               <div class="mt-3">
-                <h2 class="text-sm font-bold text-blue-900 mb-2 border-b-2 border-gray-100 pb-1">Details:</h2>
+                <h2 class="text-sm font-bold text-blue-900 uppercase mb-2 border-b-2 border-gray-100 pb-1">Defect Description & Maintenance Plan</h2>
                 <div class="space-y-2">
                   <div class="grid grid-cols-4 gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
                     <div>
@@ -924,12 +907,12 @@ export default function Runs() {
                       <span class="block text-xs font-semibold text-gray-900 mt-0.5">${componentId}</span>
                     </div>
                     <div>
-                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Longitude</span>
-                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${lngStr}</span>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Batch / Run ID</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${run.run_id}</span>
                     </div>
                     <div>
-                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Latitude</span>
-                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${latStr}</span>
+                      <span class="block text-[10px] font-bold text-gray-500 uppercase">Inspection Date</span>
+                      <span class="block text-xs font-semibold text-gray-900 mt-0.5">${inspectionDate}</span>
                     </div>
                   </div>
                   <div>
@@ -1018,7 +1001,6 @@ export default function Runs() {
               <p class="text-xs text-gray-400 ${thermalPdfTight ? "mt-1" : "mt-2"}">Batch: <span class="font-Poppins">${run.run_id}</span> • Type: ${dtype.toUpperCase()} • Created: ${createdIso}</p>
               <p class="text-xs text-gray-400 mt-1">Assigned to: <span class="font-Poppins text-gray-600">${assigneeEscaped}</span></p>
               <p class="text-lg text-black mt-1.5 leading-relaxed font-medium">${pdfBatchMetaLine(batchTotal, approvedCount, batchProcessingMs)}</p>
-              ${pdfBatchIdAndInspectionRow(run.run_id, inspectionDate)}
             </div>
             <div class="mt-4 md:mt-0 text-right">
               <img src="${brandLogoSrc}" alt="AzərEnerji" class="${thermalPdfTight ? "h-24 md:h-28" : "h-[9rem] md:h-[10.5rem]"} w-auto object-contain ml-auto" />
@@ -1816,7 +1798,7 @@ ${pdfPageChunks.join("\n")}
           role="presentation"
           onClick={() => closePreview()}
         >
-          {completedFiles.length > 1 && !isDjiThermalScanUpload && previewRun.type === "video" && (
+          {completedFiles.length > 1 && !isDjiThermalScanUpload && (
             <>
               <button
                 type="button"
@@ -1829,7 +1811,7 @@ ${pdfPageChunks.join("\n")}
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); navigatePreview(1); }}
-                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2.5 hover:bg-[var(--dash-hover-bg)] transition-all duration-150 shadow-lg right-[max(1rem,calc(320px+220px+0.5rem))]"
+                className="absolute top-1/2 z-10 -translate-y-1/2 rounded-full dash-text-primary p-2.5 hover:bg-[var(--dash-hover-bg)] transition-all duration-150 shadow-lg right-[max(1rem,calc(320px+0.5rem))]"
                 style={{ backgroundColor: "var(--dash-elevated-bg)" }}
               >
                 <ChevronRight size={20} />
@@ -2211,32 +2193,7 @@ ${pdfPageChunks.join("\n")}
                           playerClassName="max-h-[min(80vh,calc(100vh-8rem))] w-full max-w-full rounded-2xl bg-black shadow-2xl"
                         />
                       ) : (
-                        <div
-                          className={`relative mx-auto flex w-full items-center justify-center ${
-                            completedFiles.length > 1 && previewRun.type !== "video"
-                              ? "max-w-6xl gap-2 sm:gap-4"
-                              : "max-w-5xl flex-col"
-                          }`}
-                        >
-                          {completedFiles.length > 1 && previewRun.type !== "video" && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigatePreview(-1);
-                              }}
-                              className="shrink-0 self-center rounded-full dash-text-primary p-2.5 shadow-lg transition-all duration-150 hover:bg-[var(--dash-hover-bg)]"
-                              style={{ backgroundColor: "var(--dash-elevated-bg)" }}
-                              aria-label="Previous file"
-                            >
-                              <ChevronLeft size={20} />
-                            </button>
-                          )}
-                          <div
-                            className={`relative flex min-w-0 flex-col items-center ${
-                              completedFiles.length > 1 && previewRun.type !== "video" ? "flex-1" : "w-full"
-                            }`}
-                          >
+                        <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center">
                           {(previewFile.annotated_url || runsPreviewThumbSrc) && (
                             <div
                               className="absolute top-3 left-3 z-10 flex items-center gap-0.5 rounded-xl border border-[var(--dash-panel-border)] overflow-hidden shadow-lg"
@@ -2322,21 +2279,6 @@ ${pdfPageChunks.join("\n")}
                             >
                               No preview available
                             </div>
-                          )}
-                          </div>
-                          {completedFiles.length > 1 && previewRun.type !== "video" && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigatePreview(1);
-                              }}
-                              className="shrink-0 self-center rounded-full dash-text-primary p-2.5 shadow-lg transition-all duration-150 hover:bg-[var(--dash-hover-bg)]"
-                              style={{ backgroundColor: "var(--dash-elevated-bg)" }}
-                              aria-label="Next file"
-                            >
-                              <ChevronRight size={20} />
-                            </button>
                           )}
                         </div>
                       )

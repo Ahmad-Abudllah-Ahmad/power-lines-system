@@ -1,2 +1,0 @@
-pip install --quiet --no-cache-dir ultralytics==8.3.40 fastapi==0.115.5 "uvicorn[standard]==0.32.1" python-multipart==0.0.17 pillow opencv-python-headless 2>&1 | tail -3
-python -c "import ultralytics, fastapi, uvicorn, multipart, cv2, PIL; print('ultralytics', ultralytics.__version__); print('fastapi', fastapi.__version__); print('uvicorn', uvicorn.__version__); print('cv2', cv2.__version__); print('OK')"
