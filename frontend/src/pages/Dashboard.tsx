@@ -411,7 +411,9 @@ function RecentBatchUploadDetailModal({
 
   const overlayDetections = filterRowsForRgbPreviewOverlay(
     previewDetectionRows,
-    clsFilter.hiddenSet
+    clsFilter.hiddenSet,
+    iw,
+    ih
   ).filter((d) => Array.isArray(d.bbox) && d.bbox.length >= 4) as Array<{
     bbox: number[];
     class_name?: string;

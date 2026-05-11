@@ -588,7 +588,12 @@ export default function AIDetection() {
     enabled: previewShowLiveOverlay,
     sourceW: previewCard?.imageWidth ?? 0,
     sourceH: previewCard?.imageHeight ?? 0,
-    detections: filterRowsForRgbPreviewOverlay(previewDetections, clsFilter.hiddenSet) as Detection[],
+    detections: filterRowsForRgbPreviewOverlay(
+      previewDetections,
+      clsFilter.hiddenSet,
+      previewCard?.imageWidth ?? 0,
+      previewCard?.imageHeight ?? 0
+    ) as Detection[],
     imageUrlKey: previewImgSrc ?? "",
     modalZoom,
   });

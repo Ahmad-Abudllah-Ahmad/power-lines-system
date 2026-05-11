@@ -267,6 +267,52 @@ def _result_pred(r):
     return getattr(r, "boxes", None)
 
 
+# Bottom-right DJI-style telemetry OSD (red strip / white text) — mask for inference + drop boxes
+# centered inside this rect so the model does not false-detect on overlay graphics.
+_DJI_OSD_EXCLUDE_WIDTH_FRAC = 0.38
+_DJI_OSD_EXCLUDE_HEIGHT_FRAC = 0.16
+_YOLO_PAD_BGR = (114, 114, 114)
+
+
+def _dji_osd_exclusion_xyxy(w: int, h: int) -> tuple[int, int, int, int]:
+    """Pixel bbox (x1, y1, x2, y2) inclusive for the bottom-right OSD strip."""
+    if w <= 0 or h <= 0:
+        return (0, 0, 0, 0)
+    x1 = max(0, int(round(w * (1.0 - _DJI_OSD_EXCLUDE_WIDTH_FRAC))))
+    y1 = max(0, int(round(h * (1.0 - _DJI_OSD_EXCLUDE_HEIGHT_FRAC))))
+    x2, y2 = w - 1, h - 1
+    if x2 < x1:
+        x2 = x1
+    if y2 < y1:
+        y2 = y1
+    return (x1, y1, x2, y2)
+
+
+def _prepare_image_for_detection(img: np.ndarray) -> np.ndarray:
+    """BGR copy of ``img`` with the bottom-right OSD region filled (YOLO letterbox grey)."""
+    out = img.copy()
+    h, w = out.shape[:2]
+    x1, y1, x2, y2 = _dji_osd_exclusion_xyxy(w, h)
+    cv2.rectangle(out, (x1, y1), (x2, y2), _YOLO_PAD_BGR, thickness=-1)
+    return out
+
+
+def _filter_dets_dji_osd_exclusion(dets: list[dict], img_w: int, img_h: int) -> list[dict]:
+    """Remove detections whose box center lies inside the bottom-right OSD exclusion zone."""
+    if not dets:
+        return dets
+    ox1, oy1, ox2, oy2 = _dji_osd_exclusion_xyxy(img_w, img_h)
+    kept: list[dict] = []
+    for d in dets:
+        bx1, by1, bx2, by2 = d["bbox"]
+        cx = (bx1 + bx2) * 0.5
+        cy = (by1 + by2) * 0.5
+        if ox1 <= cx <= ox2 and oy1 <= cy <= oy2:
+            continue
+        kept.append(d)
+    return kept
+
+
 # ---------------------------------------------------------------------------
 # SAHI sliced inference
 # ---------------------------------------------------------------------------
@@ -300,10 +346,12 @@ def run_sahi_detection(
 
     total_steps = 2 if sahi_tiled else 1
 
+    infer_img = _prepare_image_for_detection(img)
+
     # Full-image pass on GPU (FP16 on CUDA via half= — same path as batched video)
     _emit_progress(0, total_steps, 5)
     full_results = model.predict(
-        img, conf=confidence, device=DEVICE, imgsz=full_imgsz, verbose=False, **_yolo_predict_kw()
+        infer_img, conf=confidence, device=DEVICE, imgsz=full_imgsz, verbose=False, **_yolo_predict_kw()
     )
     full_dets = []
     for r in full_results:
@@ -324,7 +372,7 @@ def run_sahi_detection(
     sahi_dets: list[dict] = []
     if sahi_tiled:
         # GPU-batched sliced prediction (all slices sent to GPU in batches instead of one-by-one)
-        img_h, img_w = img.shape[:2]
+        img_h, img_w = infer_img.shape[:2]
         step_h = max(1, int(slice_size * (1 - overlap)))
         step_w = max(1, int(slice_size * (1 - overlap)))
 
@@ -334,7 +382,7 @@ def run_sahi_detection(
             for x in range(0, img_w, step_w):
                 y2 = min(y + slice_size, img_h)
                 x2 = min(x + slice_size, img_w)
-                slices.append(img[y:y2, x:x2])
+                slices.append(infer_img[y:y2, x:x2])
                 offsets.append((x, y))
 
         for b_start in range(0, len(slices), GPU_BATCH):
@@ -364,6 +412,9 @@ def run_sahi_detection(
     all_dets = full_dets + sahi_dets
     if len(all_dets) > 0:
         all_dets = _nms_merge(all_dets, iou_threshold=nms_iou)
+
+    ih, iw = img.shape[:2]
+    all_dets = _filter_dets_dji_osd_exclusion(all_dets, iw, ih)
 
     return all_dets
 
@@ -927,12 +978,13 @@ def _batch_detect(
     model, frames: list[np.ndarray], confidence: float, imgsz: int = 1280
 ) -> list[list[dict]]:
     """Run YOLO on a batch of frames (single GPU call)."""
+    infer_frames = [_prepare_image_for_detection(f) for f in frames]
     results = model.predict(
-        frames, conf=confidence, device=DEVICE,
+        infer_frames, conf=confidence, device=DEVICE,
         imgsz=imgsz, verbose=False, **_yolo_predict_kw(),
     )
     per_frame: list[list[dict]] = []
-    for r in results:
+    for r, fr in zip(results, frames):
         dets = []
         pred = _result_pred(r)
         if pred is not None:
@@ -944,7 +996,8 @@ def _batch_detect(
                     "class_id": cls_id,
                     "class_name": model.names.get(cls_id, str(cls_id)),
                 })
-        per_frame.append(dets)
+        fh, fw = fr.shape[:2]
+        per_frame.append(_filter_dets_dji_osd_exclusion(dets, fw, fh))
     return per_frame
 
 

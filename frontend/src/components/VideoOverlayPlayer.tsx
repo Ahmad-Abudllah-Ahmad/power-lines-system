@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   SIDEBAR_COMPONENT_CLASS_KEYS,
+  mergeBirdNestRowsForPreview,
   normalizeDetectionClassKey,
+  rowPassesRgbPreviewGeometryFilter,
 } from "../utils/detectionSidebarBuckets";
 
 /**
@@ -144,7 +146,7 @@ export function VideoOverlayPlayer({
           frames.length - 1,
           Math.max(0, Math.round(video.currentTime * fps))
         );
-        const list = frames[idx] || [];
+        const list = mergeBirdNestRowsForPreview(frames[idx] || []);
         const linePx = Math.max(1.5, ctr * 1.5);
         const fontPx = Math.max(10, Math.round(11 * Math.max(0.6, ctr)));
         ctx.font = `${fontPx}px sans-serif`;
@@ -154,6 +156,7 @@ export function VideoOverlayPlayer({
           const name = det.class_name;
           const key = normalizeDetectionClassKey(name);
           if (hiddenClassKeys.has(key)) continue;
+          if (!rowPassesRgbPreviewGeometryFilter(det, vw, vh)) continue;
           const b = det.bbox;
           if (!Array.isArray(b) || b.length < 4) continue;
           const [x1, y1, x2, y2] = b;
