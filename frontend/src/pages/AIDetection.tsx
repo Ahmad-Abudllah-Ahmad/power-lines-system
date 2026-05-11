@@ -118,7 +118,7 @@ export default function AIDetection() {
       id: "dota_1000ep_best",
       title: "DOTA 1000ep · YOLO11x OBB (RunPod H200)",
       path: "/workspace/project/runs/obb/yolo11x_obb_dota_20260426_060214/weights/best.pt",
-      description: "YOLO on RunPod GPU (port 6006) · https://ycfjp6tp0zl9xf-64410b2b-6006.proxy.runpod.net",
+      description: "YOLO on RunPod GPU (port 6006) · https://w0tfgk852deuei-64411c51-6006.proxy.runpod.net",
     },
   ];
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>(DEFAULT_MODELS);

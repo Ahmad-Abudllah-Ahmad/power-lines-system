@@ -42,6 +42,7 @@ import {
   formatDetectionSidebarLabel,
   normalizeDetectionClassKey,
   partitionDetectionsSidebarBuckets,
+  SIDEBAR_COMPONENT_CLASS_KEYS,
   SIDEBAR_HIDDEN_CLASS_KEYS,
   uniqueDefectTypeCount,
   previewDetectionRowsForFile,
@@ -184,7 +185,13 @@ async function fetchAsDataUrl(url: string): Promise<string | null> {
   }
 }
 
-function cropDataUrl(img: HTMLImageElement, bbox: number[]) {
+const REPORT_COMPONENT_CLASS_SET = new Set<string>(SIDEBAR_COMPONENT_CLASS_KEYS);
+
+function cropDataUrlWithSingleAnnotation(
+  img: HTMLImageElement,
+  bbox: number[],
+  label: string
+) {
   const [x1, y1, x2, y2] = bbox;
   const pad = 20;
   const ix1 = Math.max(0, Math.floor(Math.min(x1, x2)) - pad);
@@ -204,6 +211,32 @@ function cropDataUrl(img: HTMLImageElement, bbox: number[]) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(img, ix1, iy1, w, h, 0, 0, w * scale, h * scale);
+
+  const rx = (Math.min(x1, x2) - ix1) * scale;
+  const ry = (Math.min(y1, y2) - iy1) * scale;
+  const rw = Math.max(1, Math.abs(x2 - x1) * scale);
+  const rh = Math.max(1, Math.abs(y2 - y1) * scale);
+  const isComponent = REPORT_COMPONENT_CLASS_SET.has(normalizeDetectionClassKey(label));
+  const color = isComponent ? "rgb(0, 200, 0)" : "rgb(220, 0, 0)";
+  const lineW = Math.max(2, Math.round(2.5 * scale));
+  const fontPx = Math.max(12, Math.round(12 * scale));
+  const padPx = Math.max(3, Math.round(4 * scale));
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineW;
+  ctx.strokeRect(rx, ry, rw, rh);
+  ctx.font = `${fontPx}px sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const textW = ctx.measureText(label).width;
+  const bgW = textW + padPx * 2;
+  const bgH = fontPx + padPx * 2;
+  let top = ry - bgH;
+  if (top < 0) top = Math.min(canvas.height - bgH, ry + rh + 2);
+  ctx.fillStyle = color;
+  ctx.fillRect(rx, top, bgW, bgH);
+  ctx.fillStyle = "rgb(0, 0, 0)";
+  ctx.fillText(label, rx + padPx, top + bgH / 2);
   return canvas.toDataURL("image/png");
 }
 
@@ -840,15 +873,17 @@ export default function Runs() {
 
         if (boxes.length === 0) continue;
 
+        const cleanUrl = (f as Record<string, unknown>)?.clean_url
+          ? String((f as Record<string, unknown>).clean_url).trim()
+          : "";
         const originalUrl = (f.thumb_url || "").trim();
         const annotatedUrl = (f.annotated_url || f.thumb_url || "").trim();
         if (!annotatedUrl) continue;
-        const referenceSourceUrl = originalUrl || annotatedUrl;
+        const referenceSourceUrl = cleanUrl || originalUrl || annotatedUrl;
 
         let referenceImg: HTMLImageElement | null = null;
-        let defectImg: HTMLImageElement | null = null;
         try {
-          [referenceImg, defectImg] = await Promise.all([loadImage(referenceSourceUrl), loadImage(annotatedUrl)]);
+          referenceImg = await loadImage(referenceSourceUrl);
         } catch {
           continue;
         }
@@ -861,7 +896,9 @@ export default function Runs() {
 
         for (const b of boxes) {
           const bbox = b.bbox as number[];
-          const defectCrop = defectImg ? cropDataUrl(defectImg, bbox) : null;
+          const defectCrop = referenceImg
+            ? cropDataUrlWithSingleAnnotation(referenceImg, bbox, b.label || "Defect")
+            : null;
           if (!defectCrop) continue;
 
           const label = b.label || "Defect";
